@@ -1,0 +1,1 @@
+import{s as i}from"./index-DSJVn2jZ.js";function t(e){return i("/api/nominees",{token:e})}function s(e,n){return i("/api/nominees",{method:"POST",token:n,body:JSON.stringify(e)})}function r(e,n){return i("/api/nominees/threshold",{method:"POST",token:n,body:JSON.stringify(e)})}export{s as a,t as f,r as u};

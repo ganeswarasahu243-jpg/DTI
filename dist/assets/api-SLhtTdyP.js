@@ -1,0 +1,1 @@
+import{s as e}from"./index-DSJVn2jZ.js";function n(s){return e("/api/assets",{token:s})}function o(s,t){return e(`/api/assets/${encodeURIComponent(s)}`,{token:t})}function r(s,t){return e("/api/assets",{method:"POST",token:t,body:JSON.stringify(s)})}export{o as a,r as c,n as f};

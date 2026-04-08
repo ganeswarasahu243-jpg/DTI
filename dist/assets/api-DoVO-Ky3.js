@@ -1,0 +1,1 @@
+import{s as i}from"./index-DSJVn2jZ.js";function u(t){return i("/api/security/posture",{token:t})}function s(t,e){return i("/api/security/inactivity-timer",{method:"POST",token:e,body:JSON.stringify({days:t})})}export{u as f,s as u};
