@@ -1,0 +1,1 @@
+import{j as n}from"./index-DvyL7J6e.js";function i({className:e=""}){return n.jsxDEV("span",{"aria-hidden":"true",className:`spinner-ring ${e}`},void 0,!1,{fileName:"C:/coding/DTI_Project-1/src/components/ui/Spinner.tsx",lineNumber:2,columnNumber:10},this)}export{i as S};

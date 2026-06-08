@@ -4,6 +4,7 @@ import {
   Activity,
   ChevronRight,
   HelpCircle,
+  Landmark,
   LayoutDashboard,
   PlusCircle,
   ShieldCheck,
@@ -18,6 +19,7 @@ import { StatusBadge } from '../ui/Premium'
 
 const links = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['user', 'nominee', 'admin'] as UserRole[] },
+  { label: 'Digital Vault', href: '/digital-vault', icon: Landmark, roles: ['user', 'nominee', 'admin'] as UserRole[] },
   { label: 'Add Asset', href: '/assets/new', icon: PlusCircle, roles: ['user', 'admin'] as UserRole[] },
   { label: 'Nominees', href: '/nominees', icon: Users, roles: ['user', 'nominee', 'admin'] as UserRole[] },
   { label: 'Security', href: '/security', icon: ShieldCheck, roles: ['user', 'admin'] as UserRole[] },

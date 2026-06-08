@@ -233,7 +233,6 @@ export default function AddAssetPage() {
               inputMode="numeric"
               className="mt-3 w-full rounded-3xl border border-cyan-500/30 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none"
             />
-            {mfaChallenge.devOtp ? <p className="mt-3 text-cyan-200">Dev OTP: {mfaChallenge.devOtp}</p> : null}
             <div className="mt-3 flex gap-3">
               <Button type="button" onClick={handleVerifyMfa} disabled={loading || mfaCode.length !== 6}>
                 {loading ? 'Verifying...' : 'Verify and publish'}

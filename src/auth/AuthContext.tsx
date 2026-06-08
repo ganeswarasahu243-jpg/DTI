@@ -127,6 +127,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false
 
     async function bootstrap() {
+      if (token && isDemoToken(token)) {
+        const demoUser = getDemoUserFromToken(token)
+        if (!cancelled) {
+          setUser(demoUser)
+          if (demoUser) {
+            localStorage.setItem(USER_KEY, JSON.stringify(demoUser))
+          }
+          setLoading(false)
+        }
+        return
+      }
+
       if (isSupabaseConfigured && supabase) {
         try {
           const { data } = await supabase.auth.getSession()
@@ -184,6 +196,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (isSupabaseConfigured && supabase) {
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        const activeToken = localStorage.getItem(TOKEN_KEY)
+        if (!session && activeToken && isDemoToken(activeToken)) {
+          const demoUser = getDemoUserFromToken(activeToken)
+          setToken(activeToken)
+          setUser(demoUser)
+          if (demoUser) {
+            localStorage.setItem(USER_KEY, JSON.stringify(demoUser))
+          }
+          setLoading(false)
+          return
+        }
+
         hydrateSupabaseSession(session)
           .catch(() => {
             clearSession()
@@ -208,29 +232,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const normalizedEmail = payload.email.trim().toLowerCase()
 
     if (isDemoEmail(normalizedEmail)) {
-      try {
-        const response = await loginRequest({
-          email: normalizedEmail,
-          password: payload.password,
-        })
-
-        if ('token' in response) {
-          persistSession(response)
-          setToken(response.token)
-          setUser(response.user)
-        }
-
-        return response
-      } catch {
-        const response = authenticateDemoUser({
-          email: normalizedEmail,
-          password: payload.password,
-        })
-        persistSession(response)
-        setToken(response.token)
-        setUser(response.user)
-        return response
-      }
+      const response = authenticateDemoUser({
+        email: normalizedEmail,
+        password: payload.password || 'DemoPass123!',
+      })
+      persistSession(response)
+      setToken(response.token)
+      setUser(response.user)
+      return response
     }
 
     if (isSupabaseConfigured && supabase) {
@@ -238,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: normalizedEmail,
         options: {
           shouldCreateUser: false,
+          emailRedirectTo: `${window.location.origin}/dashboard`,
         },
       })
 
@@ -279,6 +289,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         options: {
           shouldCreateUser: true,
+          emailRedirectTo: `${window.location.origin}/dashboard`,
           data: {
             name: payload.name,
             role: payload.role,
@@ -356,6 +367,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
 
     if (error) {
+      if (/unsupported provider|provider is not enabled/i.test(error.message || '')) {
+        throw new Error('Google OAuth is not enabled in Supabase. Enable Google in Authentication > Providers or use email OTP login.')
+      }
       throw new Error(error.message)
     }
   }

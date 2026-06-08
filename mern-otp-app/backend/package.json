@@ -1,0 +1,24 @@
+{
+  "name": "mern-otp-app",
+  "version": "1.0.0",
+  "description": "A MERN stack application for email OTP verification",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "test:auth": "node testEmail.js",
+    "cleanup:auth-users": "node scripts/clearAuthUsers.js",
+    "cleanup:auth-users:dry": "node scripts/clearAuthUsers.js --dry-run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "express-rate-limit": "^5.2.6"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.7"
+  },
+  "author": "Your Name",
+  "license": "MIT"
+}

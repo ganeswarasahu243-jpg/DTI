@@ -11,6 +11,12 @@ const createStmt = db.prepare(`
 `)
 const findByIdStmt = db.prepare('SELECT * FROM assets WHERE id = ?')
 const findByFileStmt = db.prepare('SELECT * FROM assets WHERE file_storage_key = ?')
+const updateStmt = db.prepare(`
+  UPDATE assets
+  SET title = ?, type = ?, encrypted_details = ?, encrypted_financial_data = ?, updated_at = ?
+  WHERE id = ?
+`)
+const deleteByIdStmt = db.prepare('DELETE FROM assets WHERE id = ?')
 const listByUserStmt = db.prepare(`
   SELECT assets.*, users.name_encrypted AS owner_name_encrypted, users.email_encrypted AS owner_email_encrypted
   FROM assets
@@ -80,6 +86,23 @@ function listAccessibleToNomineeByEmailHash(nomineeEmailHash) {
   return listAccessibleToNomineeEmailHashStmt.all(nomineeEmailHash)
 }
 
+function updateAsset(id, payload) {
+  updateStmt.run(
+    payload.title,
+    payload.type,
+    payload.encryptedDetails,
+    payload.encryptedFinancialData || null,
+    nowIso(),
+    id,
+  )
+
+  return findById(id)
+}
+
+function deleteById(id) {
+  return deleteByIdStmt.run(id).changes
+}
+
 function deleteByUser(userId) {
   deleteByUserStmt.run(userId)
 }
@@ -91,5 +114,7 @@ module.exports = {
   listByUser,
   listAccessibleToNominee,
   listAccessibleToNomineeByEmailHash,
+  updateAsset,
+  deleteById,
   deleteByUser,
 }

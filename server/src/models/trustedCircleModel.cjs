@@ -27,6 +27,14 @@ const authorizedNomineeByEmailHashStmt = db.prepare(`
   SELECT * FROM trusted_circle
   WHERE owner_user_id = ? AND nominee_email_hash = ? AND status = 'active'
 `)
+const listByNomineeUserIdStmt = db.prepare(`
+  SELECT * FROM trusted_circle
+  WHERE nominee_user_id = ? AND status = 'active'
+`)
+const listByNomineeEmailHashStmt = db.prepare(`
+  SELECT * FROM trusted_circle
+  WHERE nominee_email_hash = ? AND status = 'active'
+`)
 const deleteByOwnerStmt = db.prepare('DELETE FROM trusted_circle WHERE owner_user_id = ?')
 
 function addNominee({ ownerUserId, nomineeUserId, nomineeEmailHash, nomineeEmailEncrypted, nomineeNameEncrypted }) {
@@ -65,6 +73,14 @@ function isAuthorizedNomineeByEmailHash(ownerUserId, nomineeEmailHash) {
   return Boolean(authorizedNomineeByEmailHashStmt.get(ownerUserId, nomineeEmailHash))
 }
 
+function listByNomineeUserId(nomineeUserId) {
+  return listByNomineeUserIdStmt.all(nomineeUserId)
+}
+
+function listByNomineeEmailHash(nomineeEmailHash) {
+  return listByNomineeEmailHashStmt.all(nomineeEmailHash)
+}
+
 function deleteByOwner(ownerUserId) {
   deleteByOwnerStmt.run(ownerUserId)
 }
@@ -77,5 +93,7 @@ module.exports = {
   findByOwnerAndEmailHash,
   isAuthorizedNominee,
   isAuthorizedNomineeByEmailHash,
+  listByNomineeUserId,
+  listByNomineeEmailHash,
   deleteByOwner,
 }

@@ -5,7 +5,7 @@ const userModel = require('../models/userModel.cjs')
 const { decryptText } = require('../services/encryptionService.cjs')
 const supabaseAuthService = require('../services/supabaseAuthService.cjs')
 
-function authRequired(req, res, next) {
+async function authRequired(req, res, next) {
   const authHeader = req.headers.authorization
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -20,7 +20,7 @@ function authRequired(req, res, next) {
     try {
       payload = jwt.verify(token, config.jwtSecret)
     } catch {
-      payload = supabaseAuthService.verifySupabaseToken(token)
+      payload = await supabaseAuthService.verifySupabaseToken(token)
       authSource = payload ? 'supabase' : 'unknown'
     }
 

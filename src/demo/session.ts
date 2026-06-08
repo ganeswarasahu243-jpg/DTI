@@ -3,6 +3,7 @@ import type { AuthChallengePurpose, AuthChallengeResponse, AuthResponse, AuthUse
 import type { AssetSummary } from '../assets/api'
 import type { NomineeSummary } from '../nominees/api'
 import type { SecurityPosture } from '../security/api'
+import type { NomineeVaultsResponse } from '../vault/api'
 
 const DEMO_PASSWORD = 'DemoPass123!'
 const DEMO_TOKEN_PREFIX = 'demo-token:'
@@ -28,38 +29,6 @@ const demoUsers: AuthUser[] = [
     inactivityTimerDays: 30,
     mfa: {
       email: true,
-      totp: false,
-    },
-  },
-  {
-    id: 'demo-priya',
-    email: 'priya@loom-demo.local',
-    role: 'nominee',
-    name: 'Priya Nominee',
-    emailVerifiedAt: new Date('2026-04-01T09:05:00.000Z').toISOString(),
-    phone: '+15550000002',
-    riskScore: 12,
-    preferredOtpChannel: 'email',
-    trustedCircleThreshold: 2,
-    inactivityTimerDays: 30,
-    mfa: {
-      email: true,
-      totp: false,
-    },
-  },
-  {
-    id: 'demo-marcus',
-    email: 'marcus@loom-demo.local',
-    role: 'nominee',
-    name: 'Marcus Nominee',
-    emailVerifiedAt: new Date('2026-04-01T09:10:00.000Z').toISOString(),
-    phone: '+15550000003',
-    riskScore: 10,
-    preferredOtpChannel: 'sms',
-    trustedCircleThreshold: 2,
-    inactivityTimerDays: 30,
-    mfa: {
-      email: false,
       totp: false,
     },
   },
@@ -95,25 +64,10 @@ const initialAssets: AssetSummary[] = [
 ]
 
 const initialNominees: NomineeSummary = {
-  threshold: 2,
+  threshold: 1,
   minimumThreshold: 1,
-  nomineeCount: 2,
-  nominees: [
-    {
-      id: 'demo-nominee-1',
-      nomineeUserId: 'demo-priya',
-      email: 'priya@loom-demo.local',
-      name: 'Priya Nominee',
-      createdAt: '2026-04-02T09:00:00.000Z',
-    },
-    {
-      id: 'demo-nominee-2',
-      nomineeUserId: 'demo-marcus',
-      email: 'marcus@loom-demo.local',
-      name: 'Marcus Nominee',
-      createdAt: '2026-04-02T09:05:00.000Z',
-    },
-  ],
+  nomineeCount: 0,
+  nominees: [],
 }
 
 const initialActivity: ActivityLog[] = [
@@ -138,7 +92,7 @@ const initialActivity: ActivityLog[] = [
     deviceInfo: 'Demo Browser',
     locationHint: 'Local demo',
     severity: 'info',
-    message: 'Trusted circle is configured with two nominee approvals.',
+    message: 'Trusted circle is ready for nominee assignments.',
     metadata: { source: 'demo-mode' },
     integrityHash: null,
     createdAt: '2026-04-08T06:00:00.000Z',
@@ -231,7 +185,6 @@ export function createDemoChallenge(purpose: Exclude<AuthChallengePurpose, 'logi
     channel: 'email',
     pendingToken: `demo-pending-${purpose}`,
     expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-    devOtp: DEMO_OTP,
     requiresMfa: true,
   }
 }
@@ -298,7 +251,7 @@ export function createDemoAsset(
 ) {
   const user = getDemoUserFromToken(token)
 
-  if (!user || user.role === 'nominee') {
+  if (!user) {
     throw new Error('Only the owner demo account can add assets.')
   }
 
@@ -323,6 +276,61 @@ export function createDemoAsset(
   return { assetId }
 }
 
+export function updateDemoAsset(
+  assetId: string,
+  payload: {
+    title: string
+    type: string
+    details: string
+    financialData?: string
+  },
+  token: string,
+) {
+  const user = getDemoUserFromToken(token)
+
+  if (!user) {
+    throw new Error('Only the owner demo account can update assets.')
+  }
+
+  const assets = getDemoAssets(token)
+  const existing = assets.find((asset) => asset.id === assetId)
+
+  if (!existing) {
+    throw new Error('Asset not found.')
+  }
+
+  const updatedAsset: AssetSummary = {
+    ...existing,
+    title: payload.title.trim(),
+    type: payload.type.trim(),
+    details: payload.details.trim(),
+    financialData: payload.financialData?.trim() || null,
+    updatedAt: new Date().toISOString(),
+    ownerName: user.name,
+    ownerEmail: user.email,
+  }
+
+  writeJson(STORAGE_KEYS.assets, assets.map((asset) => (asset.id === assetId ? updatedAsset : asset)))
+  return { asset: updatedAsset }
+}
+
+export function deleteDemoAsset(assetId: string, token: string) {
+  const user = getDemoUserFromToken(token)
+
+  if (!user) {
+    throw new Error('Only the owner demo account can delete assets.')
+  }
+
+  const assets = getDemoAssets(token)
+
+  if (!assets.some((asset) => asset.id === assetId)) {
+    throw new Error('Asset not found.')
+  }
+
+  writeJson(STORAGE_KEYS.assets, assets.filter((asset) => asset.id !== assetId))
+  return { assetId }
+}
+
 export function getDemoActivityLogs() {
   return readJson(STORAGE_KEYS.activity, initialActivity)
 }
@@ -340,7 +348,7 @@ export function getDemoNominees(token: string) {
 export function addDemoNominee(payload: { name: string; email: string }, token: string) {
   const user = getDemoUserFromToken(token)
 
-  if (!user || user.role === 'nominee') {
+  if (!user) {
     throw new Error('Only the owner demo account can add nominees.')
   }
 
@@ -365,7 +373,7 @@ export function addDemoNominee(payload: { name: string; email: string }, token: 
 export function updateDemoThreshold(payload: { threshold: number }, token: string) {
   const user = getDemoUserFromToken(token)
 
-  if (!user || user.role === 'nominee') {
+  if (!user) {
     throw new Error('Only the owner demo account can update threshold settings.')
   }
 
@@ -447,5 +455,34 @@ export function updateDemoInactivityTimer(days: number, token: string) {
 
   return {
     inactivityTimerDays: Math.max(15, Math.min(days, 90)),
+  }
+}
+
+export function getDemoNomineeVaults(token: string): NomineeVaultsResponse {
+  const user = getDemoUserFromToken(token)
+  if (!user) {
+    throw new Error('Authentication required.')
+  }
+
+  return {
+    count: 1,
+    vaults: [
+      {
+        id: 'demo-nominee-vault-1',
+        ownerUserId: 'demo-estate-owner',
+        ownerName: 'Ethan Estate',
+        ownerEmail: 'estate.owner@loom-demo.local',
+        assetCount: 1,
+        eligibleForClaim: true,
+        preview: [
+          {
+            id: 'demo-estate-asset-1',
+            title: 'Estate Recovery File',
+            type: 'Legal Document',
+            updatedAt: '2026-04-09T12:00:00.000Z',
+          },
+        ],
+      },
+    ],
   }
 }

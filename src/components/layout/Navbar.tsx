@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, Menu, Search, ShieldCheck, Sparkles } from 'lucide-react'
+import { Bell, Landmark, Menu, Search, ShieldCheck, Sparkles } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
 import type { UserRole } from '../../auth/types'
 import { Button } from '../ui/Button'
+import { SecureActionMenu } from '../ui/SecureActionMenu'
 import { ThemeToggle } from '../ui/ThemeToggle'
 
 const navItems = [
   { label: 'Dashboard', href: '/dashboard', roles: ['user', 'nominee', 'admin'] as UserRole[] },
+  { label: 'Digital Vault', href: '/digital-vault', roles: ['user', 'nominee', 'admin'] as UserRole[] },
   { label: 'Assets', href: '/assets/new', roles: ['user', 'admin'] as UserRole[] },
   { label: 'Nominees', href: '/nominees', roles: ['user', 'nominee', 'admin'] as UserRole[] },
   { label: 'Profile', href: '/profile', roles: ['user', 'nominee', 'admin'] as UserRole[] },
@@ -68,12 +70,6 @@ export function Navbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
     navigate('/help')
     setSearchQuery('')
   }
-
-  const secureActionHref = user?.role === 'nominee'
-    ? '/profile'
-    : user?.role === 'admin'
-      ? '/admin'
-      : '/assets/new'
 
   return (
     <header className="sticky top-0 z-40 px-3 pt-3 sm:px-5 sm:pt-5 xl:px-8">
@@ -150,11 +146,7 @@ export function Navbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
             </div>
           </Link>
           <Button size="sm" variant="secondary" className="hidden lg:inline-flex" onClick={logout}>Log out</Button>
-          <Link to={secureActionHref} className="hidden lg:inline-flex">
-            <Button size="sm">
-              Open secure action
-            </Button>
-          </Link>
+          <SecureActionMenu className="hidden lg:block" />
         </div>
 
         <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3 lg:hidden">
@@ -164,7 +156,16 @@ export function Navbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
               {user?.name ? `${user.name} • ${user.role}` : 'Secure workspace'}
             </p>
           </div>
-          <Button size="sm" variant="secondary" className="shrink-0" onClick={logout}>Log out</Button>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/digital-vault"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]"
+              aria-label="Open digital vault"
+            >
+              <Landmark className="h-4 w-4" />
+            </Link>
+            <Button size="sm" variant="secondary" className="shrink-0" onClick={logout}>Log out</Button>
+          </div>
         </div>
       </div>
     </header>

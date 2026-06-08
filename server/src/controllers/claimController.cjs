@@ -19,10 +19,12 @@ const { getRequestContext } = require('../services/requestContextService.cjs')
 const { config } = require('../config/env.cjs')
 const crypto = require('crypto')
 
+const phoneRegex = /^\+?[1-9]\d{7,14}$/
+
 const requestSchema = z.object({
   deceasedIdentifier: z.string().trim().min(3).max(160),
   claimantName: z.string().trim().min(2).max(80),
-  claimantContact: z.string().trim().min(3).max(160),
+  claimantContact: z.string().trim().regex(phoneRegex),
 })
 
 const verifyOtpSchema = z.object({
@@ -32,12 +34,16 @@ const verifyOtpSchema = z.object({
 
 const submitSchema = z.object({
   portalToken: z.string().min(1),
-  timerMinutes: z.number().int(),
+  timerSeconds: z.number().int().optional(),
+  timerMinutes: z.number().int().optional(),
   idProof: z.object({
     name: z.string().trim().min(1).max(255),
     mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png']),
     base64: z.string().min(1),
   }),
+}).refine((payload) => Number.isInteger(payload.timerSeconds ?? payload.timerMinutes), {
+  message: 'Timer value is required.',
+  path: ['timerSeconds'],
 })
 
 const statusSchema = z.object({
@@ -115,9 +121,11 @@ function submitClaim(req, res) {
     return res.status(400).json({ message: 'Invalid claim submit payload.', issues: parsed.error.flatten() })
   }
 
-  if (!config.claimDemoTimerOptionsMinutes.includes(parsed.data.timerMinutes)) {
+  const timerSeconds = parsed.data.timerSeconds ?? parsed.data.timerMinutes
+
+  if (!config.claimDemoTimerOptionsSeconds.includes(timerSeconds)) {
     return res.status(400).json({
-      message: `Timer must be one of: ${config.claimDemoTimerOptionsMinutes.join(', ')} minutes.`,
+      message: `Timer must be one of: ${config.claimDemoTimerOptionsSeconds.join(', ')} seconds.`,
     })
   }
 
@@ -141,10 +149,10 @@ function submitClaim(req, res) {
     return res.status(400).json({ message: error.message })
   }
 
-  const timerExpiresAt = new Date(Date.now() + parsed.data.timerMinutes * 60 * 1000).toISOString()
+  const timerExpiresAt = new Date(Date.now() + timerSeconds * 1000).toISOString()
   const submittedClaim = claimModel.submitClaim(current.claim.id, {
     ...proofPayload,
-    demoTimerMinutes: parsed.data.timerMinutes,
+    demoTimerMinutes: timerSeconds,
     timerExpiresAt,
     status: 'pending',
   })
@@ -161,7 +169,7 @@ function submitClaim(req, res) {
     eventType: 'claim_submitted',
     severity: 'warn',
     message: 'A claim access request was submitted with ID proof.',
-    metadata: { claimId: submittedClaim.id, timerMinutes: parsed.data.timerMinutes },
+    metadata: { claimId: submittedClaim.id, timerSeconds },
   })
 
   return res.status(201).json(claimSummary(submittedClaim, {

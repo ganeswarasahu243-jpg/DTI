@@ -2,14 +2,17 @@ import {
   addDemoNominee,
   createDemoAsset,
   createDemoChallenge,
+  deleteDemoAsset,
   getDemoActivityLogs,
   getDemoAsset,
   getDemoAssets,
   getDemoNominees,
+  getDemoNomineeVaults,
   getDemoSecurityPosture,
   getDemoUserFromToken,
   isDemoToken,
   updateDemoInactivityTimer,
+  updateDemoAsset,
   updateDemoProfile,
   updateDemoThreshold,
   verifyDemoOtp,
@@ -93,6 +96,16 @@ async function resolveDemoRequest<T>(input: string | URL, options: ApiRequestOpt
     return asset as T
   }
 
+  if (path.startsWith('/api/assets/') && method === 'PATCH') {
+    const assetId = decodeURIComponent(path.slice('/api/assets/'.length))
+    return updateDemoAsset(assetId, parseBody(), token) as T
+  }
+
+  if (path.startsWith('/api/assets/') && method === 'DELETE') {
+    const assetId = decodeURIComponent(path.slice('/api/assets/'.length))
+    return deleteDemoAsset(assetId, token) as T
+  }
+
   if (path === '/api/assets' && method === 'POST') {
     return createDemoAsset(parseBody(), token) as T
   }
@@ -103,6 +116,10 @@ async function resolveDemoRequest<T>(input: string | URL, options: ApiRequestOpt
 
   if (path === '/api/nominees' && method === 'GET') {
     return getDemoNominees(token) as T
+  }
+
+  if (path === '/api/vault/nominee' && method === 'GET') {
+    return getDemoNomineeVaults(token) as T
   }
 
   if (path === '/api/nominees' && method === 'POST') {

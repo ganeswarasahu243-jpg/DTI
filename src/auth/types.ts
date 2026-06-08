@@ -41,7 +41,7 @@ export type AuthChallengeResponse = {
   channel: 'email' | 'sms' | 'totp'
   pendingToken: string
   expiresAt: string
-  devOtp?: string
   requiresMfa?: true
   requiresEmailVerification?: true
+  devOtpCode?: string
 }

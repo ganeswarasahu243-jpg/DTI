@@ -21,7 +21,7 @@ export function verifyClaimOtp(payload: { portalToken: string; code: string }) {
 
 export function submitClaim(payload: {
   portalToken: string
-  timerMinutes: number
+  timerSeconds: number
   idProof: { name: string; mimeType: 'application/pdf' | 'image/jpeg' | 'image/png'; base64: string }
 }) {
   return apiRequest<ClaimSummary>('/api/claim/submit', {

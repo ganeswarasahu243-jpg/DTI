@@ -190,6 +190,75 @@ function getAsset(req, res) {
   })
 }
 
+function updateAsset(req, res) {
+  const principal = getCurrentPrincipal(req)
+  if (!principal) {
+    return res.status(401).json({ message: 'Authentication required.' })
+  }
+
+  const asset = assetModel.findById(req.params.assetId)
+  if (!asset || asset.user_id !== principal.id) {
+    return res.status(404).json({ message: 'Asset not found.' })
+  }
+
+  const parsed = assetSchema.omit({ file: true }).safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid asset payload.', issues: parsed.error.flatten() })
+  }
+
+  const updatedAsset = assetModel.updateAsset(asset.id, {
+    title: parsed.data.title,
+    type: parsed.data.type,
+    encryptedDetails: encryptText(parsed.data.details),
+    encryptedFinancialData: parsed.data.financialData ? encryptText(parsed.data.financialData) : null,
+  })
+
+  auditLogService.logEvent({
+    userId: principal.id,
+    requestId: req.requestId,
+    eventType: 'asset_updated',
+    severity: 'info',
+    message: 'Secure asset metadata updated with encrypted fields.',
+    metadata: { assetId: asset.id },
+  })
+
+  return res.json({
+    asset: serializeAssetSummary(updatedAsset),
+  })
+}
+
+function deleteAsset(req, res) {
+  const principal = getCurrentPrincipal(req)
+  if (!principal) {
+    return res.status(401).json({ message: 'Authentication required.' })
+  }
+
+  const asset = assetModel.findById(req.params.assetId)
+  if (!asset || asset.user_id !== principal.id) {
+    return res.status(404).json({ message: 'Asset not found.' })
+  }
+
+  assetModel.deleteById(asset.id)
+
+  if (asset.file_storage_key) {
+    const filePath = path.join(config.privateUploadsDir, asset.file_storage_key)
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath)
+    }
+  }
+
+  auditLogService.logEvent({
+    userId: principal.id,
+    requestId: req.requestId,
+    eventType: 'asset_deleted',
+    severity: 'warn',
+    message: 'Secure asset removed from the owner portfolio.',
+    metadata: { assetId: asset.id },
+  })
+
+  return res.json({ assetId: asset.id })
+}
+
 function createSignedDownloadUrl(req, res) {
   const principal = getCurrentPrincipal(req)
   if (!principal) {
@@ -301,6 +370,8 @@ module.exports = {
   listAssets,
   createAsset,
   getAsset,
+  updateAsset,
+  deleteAsset,
   createSignedDownloadUrl,
   downloadFile,
   transferAsset,

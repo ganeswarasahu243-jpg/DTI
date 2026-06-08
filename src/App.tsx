@@ -10,6 +10,7 @@ const AuthPage = lazy(() => import('./pages/AuthPage'))
 const ClaimAccessPage = lazy(() => import('./pages/ClaimAccessPage'))
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const DigitalVaultPage = lazy(() => import('./pages/DigitalVaultPage'))
 const AddAssetPage = lazy(() => import('./pages/AddAssetPage'))
 const AssetDetailPage = lazy(() => import('./pages/AssetDetailPage'))
 const NomineeManagementPage = lazy(() => import('./pages/NomineeManagementPage'))
@@ -33,6 +34,9 @@ function App() {
             <Route path="/onboarding" element={<OnboardingPage />} />
             <Route element={<AppShell />}>
               <Route path="/dashboard" element={<DashboardPage />} />
+              <Route element={<ProtectedRoute allowedRoles={['user', 'nominee', 'admin']} />}>
+                <Route path="/digital-vault" element={<DigitalVaultPage />} />
+              </Route>
               <Route element={<ProtectedRoute allowedRoles={['user', 'nominee', 'admin']} />}>
                 <Route path="/assets/:id" element={<AssetDetailPage />} />
               </Route>

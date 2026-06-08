@@ -5,23 +5,71 @@ const userModel = require('../models/userModel.cjs')
 const { encryptText, hashLookup } = require('./encryptionService.cjs')
 
 function isConfigured() {
-  return Boolean(config.supabase.jwtSecret)
+  return Boolean(config.supabase.jwtSecret || (config.supabase.url && config.supabase.anonKey))
 }
 
-function verifySupabaseToken(token) {
+function verifySupabaseTokenWithSecret(token) {
+  if (!config.supabase.jwtSecret) {
+    return null
+  }
+
+  const payload = jwt.verify(token, config.supabase.jwtSecret)
+  if (!payload?.email || !payload?.sub) {
+    return null
+  }
+
+  return payload
+}
+
+async function verifySupabaseTokenRemotely(token) {
+  if (!config.supabase.url || !config.supabase.anonKey) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 4000)
+
+  try {
+    const response = await fetch(`${config.supabase.url}/auth/v1/user`, {
+      method: 'GET',
+      headers: {
+        apikey: config.supabase.anonKey,
+        Authorization: `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const user = await response.json()
+    if (!user?.email || !user?.id) {
+      return null
+    }
+
+    return {
+      sub: user.id,
+      email: user.email,
+      user_metadata: user.user_metadata || {},
+      app_metadata: user.app_metadata || {},
+    }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function verifySupabaseToken(token) {
   if (!isConfigured()) {
     return null
   }
 
   try {
-    const payload = jwt.verify(token, config.supabase.jwtSecret)
-    if (!payload?.email || !payload?.sub) {
-      return null
-    }
-
-    return payload
+    return verifySupabaseTokenWithSecret(token)
   } catch {
-    return null
+    return verifySupabaseTokenRemotely(token)
   }
 }
 

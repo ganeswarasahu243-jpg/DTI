@@ -1,0 +1,1 @@
+import{y as i}from"./index-DvyL7J6e.js";function t(e){return i("/api/nominees",{token:e})}function r(e,n){return i("/api/nominees",{method:"POST",token:n,body:JSON.stringify(e)})}function s(e,n){return i("/api/nominees/threshold",{method:"POST",token:n,body:JSON.stringify(e)})}export{r as a,t as f,s as u};

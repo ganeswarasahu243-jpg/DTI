@@ -14,7 +14,7 @@ const { nowIso } = require('../utils/time.cjs')
 const signupSchema = z.object({
   email: z.string().email().transform((value) => value.trim().toLowerCase()),
   password: z.string().min(8).max(128),
-  role: z.enum(['user', 'nominee']).default('user'),
+  role: z.enum(['user']).default('user'),
   name: z.string().trim().min(2).max(80),
   phone: z.string().trim().regex(/^\+?[1-9]\d{7,14}$/).optional(),
   preferredOtpChannel: z.enum(['email', 'sms']).default('email'),
@@ -45,6 +45,15 @@ const profileUpdateSchema = z.object({
   phone: z.union([z.string().trim().regex(/^\+?[1-9]\d{7,14}$/), z.literal(''), z.null()]).optional(),
   preferredOtpChannel: z.enum(['email', 'sms']).default('email'),
 })
+
+const sendOtpSchema = z.discriminatedUnion('flow', [
+  signupSchema.extend({
+    flow: z.literal('signup'),
+  }),
+  loginSchema.extend({
+    flow: z.literal('login'),
+  }),
+])
 
 function getUserEmail(user) {
   return user.email || decryptText(user.email_encrypted)
@@ -98,8 +107,29 @@ function signPendingToken(userId, purpose) {
   )
 }
 
-async function issueMfaChallenge(user, purpose, context) {
-  const channel = otpService.resolvePreferredOtpChannel(user)
+function otpDeliveryFailureResponse(error) {
+  if (error) {
+    console.error('[otp-delivery-failure]', {
+      message: error?.message,
+      code: error?.code,
+      responseCode: error?.responseCode,
+    })
+  }
+
+  const details = config.env === 'development' && error?.message
+    ? ` (${error.message})`
+    : ''
+
+  return {
+    statusCode: 502,
+    body: {
+      message: `Unable to send OTP email right now. Please check email configuration and try again.${details}`,
+    },
+  }
+}
+
+async function issueMfaChallenge(user, purpose, context, options = {}) {
+  const channel = options.channel || otpService.resolvePreferredOtpChannel(user)
   const { challenge, delivery } = await otpService.createChallenge({
     user,
     purpose,
@@ -118,7 +148,10 @@ async function issueMfaChallenge(user, purpose, context) {
     channel,
     pendingToken: signPendingToken(user.id, purpose),
     expiresAt: challenge.expires_at,
-    devOtp: delivery.provider === 'preview' && delivery.preview ? delivery.preview.code : undefined,
+    devOtpCode:
+      config.env === 'development' && delivery?.provider === 'preview'
+        ? String(delivery.preview?.code || '')
+        : undefined,
   }
 }
 
@@ -143,59 +176,60 @@ async function issueEmailVerificationChallenge(user, context) {
     channel: 'email',
     pendingToken: signPendingToken(user.id, 'email-verification'),
     expiresAt: challenge.expires_at,
-    devOtp: delivery.provider === 'preview' && delivery.preview ? delivery.preview.code : undefined,
+    devOtpCode:
+      config.env === 'development' && delivery?.provider === 'preview'
+        ? String(delivery.preview?.code || '')
+        : undefined,
   }
 }
 
-async function signup(req, res) {
-  const parsed = signupSchema.safeParse(req.body)
-  if (!parsed.success) {
-    return res.status(400).json({ message: 'Invalid signup payload.', issues: parsed.error.flatten() })
+async function createSignupChallenge(payload, req) {
+  if (
+    payload.preferredOtpChannel === 'sms' &&
+    !payload.phone
+  ) {
+    return { statusCode: 400, body: { message: 'A phone number is required to enable SMS OTP delivery.' } }
   }
 
   if (
-    parsed.data.preferredOtpChannel === 'sms' &&
-    !parsed.data.phone
+    payload.inactivityTimerDays != null &&
+    !config.inactivityTimerOptionsDays.includes(payload.inactivityTimerDays)
   ) {
-    return res.status(400).json({ message: 'A phone number is required to enable SMS OTP delivery.' })
+    return {
+      statusCode: 400,
+      body: {
+        message: `Inactivity timer must be one of: ${config.inactivityTimerOptionsDays.join(', ')} days.`,
+      },
+    }
   }
 
-  if (
-    parsed.data.inactivityTimerDays != null &&
-    !config.inactivityTimerOptionsDays.includes(parsed.data.inactivityTimerDays)
-  ) {
-    return res.status(400).json({
-      message: `Inactivity timer must be one of: ${config.inactivityTimerOptionsDays.join(', ')} days.`,
-    })
-  }
-
-  const existing = userModel.findByEmail(parsed.data.email)
+  const existing = userModel.findByEmail(payload.email)
   if (existing) {
-    return res.status(409).json({ message: 'An account with that email already exists.' })
+    return { statusCode: 409, body: { message: 'An account with that email already exists.' } }
   }
 
-  if (parsed.data.phone && userModel.findByPhone(parsed.data.phone)) {
-    return res.status(409).json({ message: 'An account with that phone number already exists.' })
+  if (payload.phone && userModel.findByPhone(payload.phone)) {
+    return { statusCode: 409, body: { message: 'An account with that phone number already exists.' } }
   }
 
-  const passwordHash = await bcrypt.hash(parsed.data.password, 12)
+  const passwordHash = await bcrypt.hash(payload.password, 12)
   const user = userModel.createUser({
-    emailEncrypted: encryptText(parsed.data.email),
-    emailHash: hashLookup(parsed.data.email),
-    nameEncrypted: encryptText(parsed.data.name),
-    phoneEncrypted: parsed.data.phone ? encryptText(parsed.data.phone) : null,
-    phoneHash: parsed.data.phone ? hashLookup(parsed.data.phone) : null,
+    emailEncrypted: encryptText(payload.email),
+    emailHash: hashLookup(payload.email),
+    nameEncrypted: encryptText(payload.name),
+    phoneEncrypted: payload.phone ? encryptText(payload.phone) : null,
+    phoneHash: payload.phone ? hashLookup(payload.phone) : null,
     passwordHash,
-    role: parsed.data.role,
-    preferredOtpChannel: parsed.data.preferredOtpChannel,
-    inactivityTimerDays: parsed.data.inactivityTimerDays || config.inactivityThresholdDays,
+    role: payload.role,
+    preferredOtpChannel: payload.preferredOtpChannel,
+    inactivityTimerDays: payload.inactivityTimerDays || config.inactivityThresholdDays,
   })
 
   const hydratedUser = {
     ...user,
-    email: parsed.data.email,
-    name: parsed.data.name,
-    phone: parsed.data.phone || null,
+    email: payload.email,
+    name: payload.name,
+    phone: payload.phone || null,
   }
   const context = getRequestContext(req)
   auditLogService.logEvent({
@@ -209,16 +243,19 @@ async function signup(req, res) {
     message: 'User account registered.',
   })
 
-  return res.status(201).json(await issueEmailVerificationChallenge(hydratedUser, context))
+  try {
+    return {
+      statusCode: 201,
+      body: await issueEmailVerificationChallenge(hydratedUser, context),
+    }
+  } catch (error) {
+    return otpDeliveryFailureResponse(error)
+  }
 }
 
-async function login(req, res) {
-  const parsed = loginSchema.safeParse(req.body)
-  if (!parsed.success) {
-    return res.status(400).json({ message: 'Invalid login payload.', issues: parsed.error.flatten() })
-  }
-
-  const user = userModel.findByEmail(parsed.data.email)
+async function createLoginChallenge(payload, req, options = {}) {
+  const forceOtp = Boolean(options.forceOtp)
+  const user = userModel.findByEmail(payload.email)
   const context = getRequestContext(req)
 
   if (!user) {
@@ -230,9 +267,13 @@ async function login(req, res) {
       locationHint: context.locationHint,
       severity: 'warn',
       message: 'Login failed for unknown email.',
-      metadata: { email: parsed.data.email },
+      metadata: { email: payload.email },
     })
-    return res.status(401).json({ message: 'Invalid email or password.' })
+    return { statusCode: 401, body: { message: 'Invalid email or password.' } }
+  }
+
+  if (user.role === 'nominee') {
+    return { statusCode: 403, body: { message: 'Nominee account access has been disabled.' } }
   }
 
   if (!isDevelopmentDemoUser(user) && user.locked_until && new Date(user.locked_until) > new Date()) {
@@ -247,10 +288,10 @@ async function login(req, res) {
       message: 'Login blocked because account is temporarily locked.',
       metadata: { lockedUntil: user.locked_until },
     })
-    return res.status(423).json({ message: 'Account is temporarily locked. Please try again later.' })
+    return { statusCode: 423, body: { message: 'Account is temporarily locked. Please try again later.' } }
   }
 
-  const passwordMatch = await bcrypt.compare(parsed.data.password, user.password_hash)
+  const passwordMatch = await bcrypt.compare(payload.password, user.password_hash)
   if (!passwordMatch) {
     const failedAttempts = user.failed_login_attempts + 1
     const shouldLock = !isDevelopmentDemoUser(user) && failedAttempts >= config.failedLoginLockThreshold
@@ -276,23 +317,33 @@ async function login(req, res) {
       message: 'Login failed due to invalid password.',
       metadata: { failedAttempts, lockedUntil },
     })
-    return res.status(401).json({ message: 'Invalid email or password.' })
+    return { statusCode: 401, body: { message: 'Invalid email or password.' } }
   }
 
   if (!user.email_verified_at) {
-    return res.json(await issueEmailVerificationChallenge(user, context))
+    try {
+      return {
+        statusCode: 200,
+        body: await issueEmailVerificationChallenge(user, context),
+      }
+    } catch (error) {
+      return otpDeliveryFailureResponse(error)
+    }
   }
 
   const risk = isDevelopmentDemoUser(user)
     ? { shouldLock: false }
     : fraudDetectionService.detectLoginRisk(user, context)
   if (risk.shouldLock) {
-    return res.status(423).json({
-      message: 'Login was blocked because the activity looks suspicious. Please retry later or contact support.',
-    })
+    return {
+      statusCode: 423,
+      body: {
+        message: 'Login was blocked because the activity looks suspicious. Please retry later or contact support.',
+      },
+    }
   }
 
-  if (isDevelopmentDemoUser(user)) {
+  if (isDevelopmentDemoUser(user) && !forceOtp) {
     userModel.resetFailedAttempts(user.id)
     auditLogService.logEvent({
       userId: user.id,
@@ -305,117 +356,99 @@ async function login(req, res) {
       message: 'Demo user completed login without MFA.',
     })
 
-    return res.json({
-      token: signAccessToken(user),
-      user: publicUser(user),
-    })
+    return {
+      statusCode: 200,
+      body: {
+        token: signAccessToken(user),
+        user: publicUser(user),
+      },
+    }
   }
 
-  return res.json(await issueMfaChallenge(user, 'login', context))
+  try {
+    return {
+      statusCode: 200,
+      body: await issueMfaChallenge(user, 'login', context, { channel: 'email' }),
+    }
+  } catch (error) {
+    return otpDeliveryFailureResponse(error)
+  }
 }
 
-async function verifyLogin(req, res) {
-  const parsed = otpVerifySchema.safeParse(req.body)
-  if (!parsed.success) {
-    return res.status(400).json({ message: 'Invalid OTP verification payload.', issues: parsed.error.flatten() })
-  }
-
+async function finalizeOtpVerification(payload, req, expectedPurpose = null) {
   let pending
   try {
-    pending = jwt.verify(parsed.data.pendingToken, config.jwtSecret)
-  } catch (error) {
-    return res.status(401).json({ message: 'Pending MFA token expired or invalid.' })
+    pending = jwt.verify(payload.pendingToken, config.jwtSecret)
+  } catch (_error) {
+    return { statusCode: 401, body: { message: 'Pending verification token expired or invalid.' } }
   }
 
-  if (pending.stage !== 'mfa-pending' || pending.purpose !== 'login') {
-    return res.status(400).json({ message: 'Invalid MFA verification context.' })
+  if (pending.stage !== 'mfa-pending') {
+    return { statusCode: 400, body: { message: 'Invalid verification context.' } }
+  }
+
+  if (expectedPurpose && pending.purpose !== expectedPurpose) {
+    return { statusCode: 400, body: { message: 'Invalid verification context.' } }
+  }
+
+  if (!['login', 'email-verification'].includes(pending.purpose)) {
+    return { statusCode: 400, body: { message: 'OTP verification is not available for this flow.' } }
   }
 
   const user = userModel.findById(pending.sub)
-  const challenge = otpModel.findById(parsed.data.challengeId)
+  const challenge = otpModel.findById(payload.challengeId)
   if (!user || !challenge || challenge.user_id !== user.id) {
-    return res.status(404).json({ message: 'OTP challenge not found.' })
+    return { statusCode: 404, body: { message: 'OTP challenge not found.' } }
   }
 
   const verification = await otpService.verifyChallenge({
     challenge,
     user,
-    code: parsed.data.code,
+    code: payload.code,
   })
 
+  const context = getRequestContext(req)
   if (!verification.ok) {
-    const context = getRequestContext(req)
     auditLogService.logEvent({
       userId: user.id,
       requestId: context.requestId,
-      eventType: 'mfa_verification_failed',
+      eventType: pending.purpose === 'login' ? 'mfa_verification_failed' : 'email_verification_failed',
       ipAddress: context.ipAddress,
       deviceInfo: context.deviceInfo,
       locationHint: context.locationHint,
       severity: 'warn',
       message: verification.reason,
-      metadata: { challengeId: challenge.id },
+      metadata: { challengeId: challenge.id, purpose: pending.purpose },
     })
-    return res.status(401).json({ message: verification.reason })
+    return { statusCode: 401, body: { message: verification.reason } }
   }
 
-  userModel.resetFailedAttempts(user.id)
-  const updatedUser = userModel.findById(user.id)
-  const context = getRequestContext(req)
-  auditLogService.logEvent({
-    userId: user.id,
-    requestId: context.requestId,
-    eventType: 'login_success',
-    ipAddress: context.ipAddress,
-    deviceInfo: context.deviceInfo,
-    locationHint: context.locationHint,
-    severity: 'info',
-    message: 'User completed MFA login.',
-    metadata: { deviceFingerprint: context.deviceFingerprint },
-  })
+  if (pending.purpose === 'login') {
+    userModel.resetFailedAttempts(user.id)
+    const updatedUser = userModel.findById(user.id)
+    auditLogService.logEvent({
+      userId: user.id,
+      requestId: context.requestId,
+      eventType: 'login_success',
+      ipAddress: context.ipAddress,
+      deviceInfo: context.deviceInfo,
+      locationHint: context.locationHint,
+      severity: 'info',
+      message: 'User completed MFA login.',
+      metadata: { deviceFingerprint: context.deviceFingerprint },
+    })
 
-  return res.json({
-    token: signAccessToken(updatedUser),
-    user: publicUser(updatedUser),
-  })
-}
-
-async function verifyEmail(req, res) {
-  const parsed = otpVerifySchema.safeParse(req.body)
-  if (!parsed.success) {
-    return res.status(400).json({ message: 'Invalid email verification payload.', issues: parsed.error.flatten() })
-  }
-
-  let pending
-  try {
-    pending = jwt.verify(parsed.data.pendingToken, config.jwtSecret)
-  } catch (_error) {
-    return res.status(401).json({ message: 'Pending verification token expired or invalid.' })
-  }
-
-  if (pending.stage !== 'mfa-pending' || pending.purpose !== 'email-verification') {
-    return res.status(400).json({ message: 'Invalid email verification context.' })
-  }
-
-  const user = userModel.findById(pending.sub)
-  const challenge = otpModel.findById(parsed.data.challengeId)
-  if (!user || !challenge || challenge.user_id !== user.id) {
-    return res.status(404).json({ message: 'Email verification challenge not found.' })
-  }
-
-  const verification = await otpService.verifyChallenge({
-    challenge,
-    user,
-    code: parsed.data.code,
-  })
-
-  if (!verification.ok) {
-    return res.status(401).json({ message: verification.reason })
+    return {
+      statusCode: 200,
+      body: {
+        token: signAccessToken(updatedUser),
+        user: publicUser(updatedUser),
+      },
+    }
   }
 
   userModel.markEmailVerified(user.id)
   const verifiedUser = userModel.findById(user.id)
-  const context = getRequestContext(req)
   auditLogService.logEvent({
     userId: user.id,
     requestId: context.requestId,
@@ -427,10 +460,79 @@ async function verifyEmail(req, res) {
     message: 'User verified their email address.',
   })
 
-  return res.json({
-    token: signAccessToken(verifiedUser),
-    user: publicUser(verifiedUser),
-  })
+  return {
+    statusCode: 200,
+    body: {
+      token: signAccessToken(verifiedUser),
+      user: publicUser(verifiedUser),
+    },
+  }
+}
+
+async function signup(req, res) {
+  const parsed = signupSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid signup payload.', issues: parsed.error.flatten() })
+  }
+
+  const result = await createSignupChallenge(parsed.data, req)
+  return res.status(result.statusCode).json(result.body)
+}
+
+async function login(req, res) {
+  const parsed = loginSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid login payload.', issues: parsed.error.flatten() })
+  }
+
+  const result = await createLoginChallenge(parsed.data, req)
+  return res.status(result.statusCode).json(result.body)
+}
+
+async function sendOtp(req, res) {
+  const parsed = sendOtpSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid send OTP payload.', issues: parsed.error.flatten() })
+  }
+
+  if (parsed.data.flow === 'signup') {
+    const result = await createSignupChallenge(parsed.data, req)
+    const statusCode = result.statusCode === 201 ? 200 : result.statusCode
+    return res.status(statusCode).json(result.body)
+  }
+
+  const result = await createLoginChallenge(parsed.data, req, { forceOtp: true })
+  return res.status(result.statusCode).json(result.body)
+}
+
+async function verifyLogin(req, res) {
+  const parsed = otpVerifySchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid OTP verification payload.', issues: parsed.error.flatten() })
+  }
+
+  const result = await finalizeOtpVerification(parsed.data, req, 'login')
+  return res.status(result.statusCode).json(result.body)
+}
+
+async function verifyEmail(req, res) {
+  const parsed = otpVerifySchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid email verification payload.', issues: parsed.error.flatten() })
+  }
+
+  const result = await finalizeOtpVerification(parsed.data, req, 'email-verification')
+  return res.status(result.statusCode).json(result.body)
+}
+
+async function verifyOtp(req, res) {
+  const parsed = otpVerifySchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Invalid OTP verification payload.', issues: parsed.error.flatten() })
+  }
+
+  const result = await finalizeOtpVerification(parsed.data, req)
+  return res.status(result.statusCode).json(result.body)
 }
 
 async function createActionChallenge(req, res) {
@@ -440,7 +542,13 @@ async function createActionChallenge(req, res) {
   }
 
   const context = getRequestContext(req)
-  const response = await issueMfaChallenge(req.currentUser, parsed.data.purpose, context)
+  let response
+  try {
+    response = await issueMfaChallenge(req.currentUser, parsed.data.purpose, context)
+  } catch (error) {
+    const deliveryFailure = otpDeliveryFailureResponse(error)
+    return res.status(deliveryFailure.statusCode).json(deliveryFailure.body)
+  }
   auditLogService.logEvent({
     userId: req.currentUser.id,
     requestId: context.requestId,
@@ -588,6 +696,8 @@ function enableTotp(req, res) {
 }
 
 module.exports = {
+  sendOtp,
+  verifyOtp,
   signup,
   login,
   verifyLogin,

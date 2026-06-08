@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 
 const labelMap: Record<string, string> = {
   dashboard: 'Dashboard',
+  'digital-vault': 'Digital Vault',
   assets: 'Assets',
   new: 'Add Asset',
   security: 'Security',

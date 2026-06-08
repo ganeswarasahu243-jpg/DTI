@@ -4,7 +4,6 @@ import { AnimatePresence } from 'framer-motion'
 import {
   ArrowRight,
   CheckCircle2,
-  ChevronRight,
   Clock3,
   LockKeyhole,
   Menu,
@@ -65,7 +64,7 @@ const steps = [
   },
   {
     title: 'Respond with confidence',
-    description: 'Claimants enter a separate portal, verify identity, and receive limited read-only access when consensus is satisfied.',
+    description: 'Track approvals, monitor security posture, and confirm inheritance workflows from one calm control center.',
   },
 ]
 
@@ -76,7 +75,7 @@ const testimonials = [
     role: 'Family office operator',
   },
   {
-    quote: 'Our claim flow is clearer, calmer, and dramatically easier for non-technical beneficiaries.',
+    quote: 'Our inheritance workflows are clearer, calmer, and dramatically easier for non-technical beneficiaries.',
     name: 'Marcus Bell',
     role: 'Estate planning advisor',
   },
@@ -172,9 +171,6 @@ export default function LandingPage() {
                   <Link to="/auth" onClick={() => setMobileMenuOpen(false)}>
                     <Button className="w-full">Get Started</Button>
                   </Link>
-                  <Link to="/claim-access" onClick={() => setMobileMenuOpen(false)}>
-                    <Button variant="secondary" className="w-full">Open Claim Portal</Button>
-                  </Link>
                 </div>
               </motion.div>
             </motion.div>
@@ -195,7 +191,7 @@ export default function LandingPage() {
                 </h1>
                 <p className="mt-4 max-w-2xl text-base leading-8 text-[var(--text-secondary)] sm:text-lg">
                   LOOM gives families a secure, calm, and modern way to protect digital assets,
-                  verify inheritance claims, and release access only when the right safeguards align.
+                  coordinate approvals, and release access only when the right safeguards align.
                 </p>
 
                 <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:flex-wrap">
@@ -207,11 +203,6 @@ export default function LandingPage() {
                   </Link>
                   <Link to="/auth">
                     <Button variant="secondary" size="lg" className="w-full sm:w-auto">Login</Button>
-                  </Link>
-                  <Link to="/claim-access">
-                    <Button variant="ghost" size="lg" className="w-full sm:w-auto text-[var(--text-primary)]">
-                      Claim Access
-                    </Button>
                   </Link>
                 </div>
 
@@ -263,9 +254,9 @@ export default function LandingPage() {
 
                     <div className="grid gap-6 sm:grid-cols-[0.9fr_1.1fr]">
                       <div className="rounded-[20px] border border-[var(--border)] bg-[var(--surface)] p-7">
-                        <p className="eyebrow">Claim flow</p>
+                        <p className="eyebrow">Security checkpoints</p>
                         <div className="mt-6 space-y-4">
-                          {['OTP verified', 'Timer expired', 'Majority approved', 'Read-only token issued'].map((item, index) => (
+                          {['MFA enabled', 'Timer active', 'Majority approval set', 'Audit trail synchronized'].map((item, index) => (
                             <div key={item} className="flex items-center gap-3">
                               <div className="grid h-8 w-8 place-items-center rounded-full bg-[var(--accent-soft)] text-sm font-semibold text-[var(--text-primary)]">
                                 {index + 1}
@@ -286,7 +277,7 @@ export default function LandingPage() {
                           </div>
                           <div className="mt-6 flex items-center justify-between text-sm text-[var(--text-secondary)]">
                             <span>2 of 3 approvals complete</span>
-                            <span>Read-only mode</span>
+                            <span>Protection mode</span>
                           </div>
                         </div>
                       </div>
@@ -329,10 +320,6 @@ export default function LandingPage() {
                 Designed for clarity under pressure, LOOM guides owners, nominees, and administrators
                 through one calm, trustworthy system from setup to claim resolution.
               </p>
-              <Link to="/claim-access" className="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-[var(--accent)] transition-all duration-300 ease-in-out hover:translate-x-1">
-                Explore the claim access portal
-                <ChevronRight className="h-4 w-4" />
-              </Link>
             </div>
 
             <div className="landing-steps-grid">
@@ -361,7 +348,7 @@ export default function LandingPage() {
               <div className="mt-8 grid gap-6 sm:grid-cols-2">
                 {[
                   'Short-lived access tokens',
-                  'Read-only claimant sessions',
+                  'Read-only release previews',
                   'OTP verification and retry limits',
                   'Tamper-evident audit trails',
                 ].map((item) => (
@@ -395,7 +382,6 @@ export default function LandingPage() {
             </div>
             <div className="flex flex-wrap gap-4">
               <Link to="/auth" className="transition-all duration-300 ease-in-out hover:text-[var(--text-primary)]">Get Started</Link>
-              <Link to="/claim-access" className="transition-all duration-300 ease-in-out hover:text-[var(--text-primary)]">Claim Access</Link>
               <Link to="/help" className="transition-all duration-300 ease-in-out hover:text-[var(--text-primary)]">Help</Link>
             </div>
           </footer>

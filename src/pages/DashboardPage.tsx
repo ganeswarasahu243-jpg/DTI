@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, ArrowUpRight, Clock3, LockKeyhole, Plus, ShieldCheck, Users } from 'lucide-react'
+import { Activity, Clock3, Landmark, LockKeyhole, Pencil, ShieldCheck, Trash2, Users, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { fetchActivityLogs, type ActivityLog } from '../activity/api'
-import { fetchAssets, type AssetSummary } from '../assets/api'
+import { deleteAsset, fetchAssets, updateAsset, type AssetSummary } from '../assets/api'
 import { useAuth } from '../auth/AuthContext'
+import type { AuthChallengeResponse } from '../auth/types'
 import { fetchNominees, type NomineeSummary } from '../nominees/api'
 import { fetchSecurityPosture, type SecurityPosture } from '../security/api'
 import { getDemoAssetsByEmail, isDemoEmail } from '../demo/session'
@@ -11,20 +12,69 @@ import { AnimatedProgressBar } from '../components/ui/AnimatedProgressBar'
 import { Button } from '../components/ui/Button'
 import { PageTransition } from '../components/ui/PageTransition'
 import { Reveal } from '../components/ui/Reveal'
+import { SecureActionMenu } from '../components/ui/SecureActionMenu'
 
 const quickActions = [
-  { label: 'Add Asset', href: '/assets/new', icon: Plus, description: 'Store a new document, wallet, or inheritance instruction.' },
-  { label: 'Add Trusted Contact', href: '/nominees', icon: Users, description: 'Update your trusted circle and configure approval responsibilities.' },
+  { label: 'Open Digital Vault', href: '/digital-vault', icon: Landmark, description: 'View owner vaults, shared access, and current claim eligibility states.' },
+  { label: 'Manage Trusted Circle', href: '/nominees', icon: Users, description: 'Update your trusted circle and configure approval responsibilities.' },
   { label: 'Set Timer', href: '/security', icon: Clock3, description: 'Adjust inactivity settings and release verification controls.' },
 ]
+const assetTypes = ['Investment', 'Digital Asset', 'Real Estate', 'Document', 'Trust Document']
+type AssetFormState = {
+  title: string
+  type: string
+  financialData: string
+  details: string
+}
+
+function toAssetForm(asset: AssetSummary): AssetFormState {
+  return {
+    title: asset.title,
+    type: asset.type,
+    financialData: asset.financialData || '',
+    details: asset.details,
+  }
+}
 
 export default function DashboardPage() {
-  const { user, token } = useAuth()
+  const { user, token, requestActionChallenge, verifyOtp } = useAuth()
   const [assets, setAssets] = useState<AssetSummary[]>([])
   const [nominees, setNominees] = useState<NomineeSummary | null>(null)
   const [posture, setPosture] = useState<SecurityPosture | null>(null)
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const [assetsError, setAssetsError] = useState('')
+  const [assetActionError, setAssetActionError] = useState('')
+  const [assetActionSuccess, setAssetActionSuccess] = useState('')
+  const [editingAsset, setEditingAsset] = useState<AssetSummary | null>(null)
+  const [editForm, setEditForm] = useState<AssetFormState>({ title: '', type: 'Investment', financialData: '', details: '' })
+  const [deleteTarget, setDeleteTarget] = useState<AssetSummary | null>(null)
+  const [assetActionLoading, setAssetActionLoading] = useState<'update' | 'delete' | ''>('')
+  const [mfaChallenge, setMfaChallenge] = useState<AuthChallengeResponse | null>(null)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaIntent, setMfaIntent] = useState<'update' | 'delete' | null>(null)
+
+  async function refreshAssets() {
+    if (!token || !user) {
+      return
+    }
+
+    try {
+      const response = await fetchAssets(token)
+      setAssets(response.assets)
+      setAssetsError('')
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : 'Unable to load shared assets.'
+      const fallbackAssets = user.email && isDemoEmail(user.email) ? getDemoAssetsByEmail(user.email) : []
+
+      if (fallbackAssets.length) {
+        setAssets(fallbackAssets)
+        setAssetsError('')
+      } else {
+        setAssets([])
+        setAssetsError(message)
+      }
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -103,6 +153,151 @@ export default function DashboardPage() {
   }, [nominees])
 
   const canManageVault = user?.role === 'user' || user?.role === 'admin'
+  const isEditFormValid = editForm.title.trim().length >= 3 && editForm.type.trim().length >= 2 && editForm.details.trim().length >= 10
+
+  function openEditModal(asset: AssetSummary) {
+    setEditingAsset(asset)
+    setEditForm(toAssetForm(asset))
+    setAssetActionError('')
+    setAssetActionSuccess('')
+    setMfaChallenge(null)
+    setMfaCode('')
+    setMfaIntent(null)
+  }
+
+  function closeEditModal() {
+    if (assetActionLoading) {
+      return
+    }
+
+    setEditingAsset(null)
+    setMfaChallenge(null)
+    setMfaCode('')
+    setMfaIntent(null)
+  }
+
+  async function requestAssetMfa(intent: 'update' | 'delete', message: string) {
+    const challenge = await requestActionChallenge({ purpose: 'asset-access' })
+    setMfaIntent(intent)
+    setMfaChallenge(challenge)
+    setMfaCode('')
+    setAssetActionError(message)
+  }
+
+  async function performUpdate() {
+    if (!token || !editingAsset || !isEditFormValid) {
+      return
+    }
+
+    const response = await updateAsset(editingAsset.id, {
+      title: editForm.title.trim(),
+      type: editForm.type.trim(),
+      details: editForm.details.trim(),
+      financialData: editForm.financialData.trim(),
+    }, token)
+
+    setAssets((current) => current.map((asset) => (asset.id === response.asset.id ? response.asset : asset)))
+    setEditingAsset(null)
+    setAssetActionSuccess('Asset updated successfully.')
+    await refreshAssets()
+  }
+
+  async function handleUpdateAsset() {
+    if (!isEditFormValid) {
+      setAssetActionError('Complete the asset name, type, and description before saving.')
+      return
+    }
+
+    setAssetActionLoading('update')
+    setAssetActionError('')
+    setAssetActionSuccess('')
+
+    try {
+      await performUpdate()
+    } catch (updateError) {
+      const message = updateError instanceof Error ? updateError.message : 'Unable to update the asset.'
+      if (message.includes('Recent MFA verification required')) {
+        try {
+          await requestAssetMfa('update', 'Complete the MFA step below, then we will save the asset update.')
+        } catch (challengeError) {
+          setAssetActionError(challengeError instanceof Error ? challengeError.message : message)
+        }
+      } else {
+        setAssetActionError(message)
+      }
+    } finally {
+      setAssetActionLoading('')
+    }
+  }
+
+  async function performDelete() {
+    if (!token || !deleteTarget) {
+      return
+    }
+
+    const removedId = deleteTarget.id
+    await deleteAsset(removedId, token)
+    setAssets((current) => current.filter((asset) => asset.id !== removedId))
+    setDeleteTarget(null)
+    setAssetActionSuccess('Asset removed from your portfolio.')
+    await refreshAssets()
+  }
+
+  async function handleDeleteAsset() {
+    setAssetActionLoading('delete')
+    setAssetActionError('')
+    setAssetActionSuccess('')
+
+    try {
+      await performDelete()
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : 'Unable to delete the asset.'
+      if (message.includes('Recent MFA verification required')) {
+        try {
+          await requestAssetMfa('delete', 'Complete the MFA step below, then we will remove this asset.')
+        } catch (challengeError) {
+          setAssetActionError(challengeError instanceof Error ? challengeError.message : message)
+        }
+      } else {
+        setAssetActionError(message)
+      }
+    } finally {
+      setAssetActionLoading('')
+    }
+  }
+
+  async function handleVerifyAssetMfa() {
+    if (!mfaChallenge || !mfaIntent || mfaCode.length !== 6) {
+      return
+    }
+
+    setAssetActionLoading(mfaIntent)
+    setAssetActionError('')
+    setAssetActionSuccess('')
+
+    try {
+      await verifyOtp({
+        pendingToken: mfaChallenge.pendingToken,
+        challengeId: mfaChallenge.challengeId,
+        code: mfaCode,
+        purpose: mfaChallenge.purpose,
+      })
+
+      if (mfaIntent === 'update') {
+        await performUpdate()
+      } else {
+        await performDelete()
+      }
+
+      setMfaChallenge(null)
+      setMfaCode('')
+      setMfaIntent(null)
+    } catch (verifyError) {
+      setAssetActionError(verifyError instanceof Error ? verifyError.message : 'Unable to verify MFA.')
+    } finally {
+      setAssetActionLoading('')
+    }
+  }
 
   return (
     <PageTransition className="space-y-6">
@@ -117,24 +312,8 @@ export default function DashboardPage() {
               <p className="mt-4 max-w-2xl text-base leading-8 text-[var(--text-secondary)]">
                 Monitor stored assets, trusted contacts, and release readiness from one encrypted control center.
               </p>
-              <div className="mt-7 flex flex-wrap gap-3">
-                {canManageVault ? (
-                  <>
-                    <Link to="/assets/new">
-                      <Button>
-                        Add Asset
-                        <ArrowUpRight className="h-4 w-4" />
-                      </Button>
-                    </Link>
-                    <Link to="/nominees">
-                      <Button variant="secondary">Manage Trusted Circle</Button>
-                    </Link>
-                  </>
-                ) : (
-                  <Link to="/profile">
-                    <Button variant="secondary">View Profile</Button>
-                  </Link>
-                )}
+              <div className="mt-8 w-full sm:w-auto">
+                <SecureActionMenu fullWidth />
               </div>
             </div>
 
@@ -174,7 +353,7 @@ export default function DashboardPage() {
               </div>
 
               <div className="mt-6 grid gap-4 md:grid-cols-3">
-                {quickActions.filter((action) => canManageVault || action.href !== '/assets/new').map((action, index) => (
+                {quickActions.filter((action) => canManageVault || action.href !== '/security').map((action, index) => (
                   <Reveal key={action.label} delay={index * 0.05}>
                     <Link to={action.href} className="card-hover rounded-[1.75rem] border border-[var(--border)] bg-[var(--surface)] p-5 transition">
                       <action.icon className="h-5 w-5 text-[var(--accent)]" />
@@ -197,11 +376,23 @@ export default function DashboardPage() {
                 {canManageVault ? <Link to="/assets/new" className="text-sm font-semibold text-[var(--accent)] transition-all duration-300 ease-in-out hover:translate-x-1">Add more</Link> : null}
               </div>
 
+              {assetActionError ? (
+                <div className="mt-5 rounded-3xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
+                  {assetActionError}
+                </div>
+              ) : null}
+
+              {assetActionSuccess ? (
+                <div className="mt-5 rounded-3xl border border-green-500/20 bg-green-500/10 p-4 text-sm text-green-200">
+                  {assetActionSuccess}
+                </div>
+              ) : null}
+
               <div className="mt-6 grid gap-4 lg:grid-cols-2">
                 {assets.length ? assets.map((asset, index) => (
                   <Reveal key={asset.id} delay={index * 0.04}>
-                    <Link to={`/assets/${asset.id}`} className="block">
-                      <article className="card-hover rounded-[1.75rem] border border-[var(--border)] bg-[var(--surface)] p-5">
+                    <article className="card-hover rounded-[1.75rem] border border-[var(--border)] bg-[var(--surface)] p-5">
+                      <Link to={`/assets/${asset.id}`} className="block">
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-xs uppercase tracking-[0.26em] text-[var(--text-muted)]">{asset.type}</p>
@@ -219,8 +410,40 @@ export default function DashboardPage() {
                           <span>{asset.financialData || 'No financial data'}</span>
                           <span>{new Date(asset.updatedAt).toLocaleDateString()}</span>
                         </div>
-                      </article>
-                    </Link>
+                      </Link>
+
+                      {canManageVault ? (
+                        <div className="mt-5 flex flex-col gap-3 border-t border-[var(--border)] pt-4 sm:flex-row">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => openEditModal(asset)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => {
+                              setDeleteTarget(asset)
+                              setAssetActionError('')
+                              setAssetActionSuccess('')
+                              setMfaChallenge(null)
+                              setMfaCode('')
+                              setMfaIntent(null)
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </Button>
+                        </div>
+                      ) : null}
+                    </article>
                   </Reveal>
                 )) : (
                   <div className="rounded-[1.75rem] border border-dashed border-[var(--border)] bg-[var(--surface)] p-5 text-sm text-[var(--text-secondary)]">
@@ -306,6 +529,158 @@ export default function DashboardPage() {
           </Reveal>
         </div>
       </section>
+
+      {editingAsset ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 p-4 backdrop-blur-xl">
+          <div className="w-full max-w-2xl rounded-[2rem] border border-[var(--border)] bg-[var(--surface-strong)] p-6 shadow-[0_30px_120px_-40px_rgba(0,0,0,0.95)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="eyebrow">Update asset</p>
+                <h2 className="mt-3 text-2xl font-semibold text-[var(--text-primary)]">Edit portfolio record</h2>
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={closeEditModal} aria-label="Close edit asset modal">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="mt-6 grid gap-4">
+              <label className="space-y-2 text-sm text-[var(--text-secondary)]">
+                <span>Asset name</span>
+                <input
+                  value={editForm.title}
+                  onChange={(event) => setEditForm((current) => ({ ...current, title: event.target.value }))}
+                  className="field-input"
+                  placeholder="Enter asset name"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-[var(--text-secondary)]">
+                <span>Asset type</span>
+                <select
+                  value={editForm.type}
+                  onChange={(event) => setEditForm((current) => ({ ...current, type: event.target.value }))}
+                  className="field-input"
+                >
+                  {assetTypes.map((type) => (
+                    <option key={type} value={type} className="bg-slate-950 text-white">
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-2 text-sm text-[var(--text-secondary)]">
+                <span>Financial data or estimated value</span>
+                <input
+                  value={editForm.financialData}
+                  onChange={(event) => setEditForm((current) => ({ ...current, financialData: event.target.value }))}
+                  className="field-input"
+                  placeholder="$120,000"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm text-[var(--text-secondary)]">
+                <span>Description</span>
+                <textarea
+                  value={editForm.details}
+                  onChange={(event) => setEditForm((current) => ({ ...current, details: event.target.value }))}
+                  rows={5}
+                  className="field-input"
+                  placeholder="Describe the asset and inheritance instructions."
+                />
+              </label>
+            </div>
+
+            {mfaChallenge && mfaIntent === 'update' ? (
+              <div className="mt-5 rounded-3xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-100">
+                <p className="font-semibold">Recent MFA required before saving this asset.</p>
+                <input
+                  value={mfaCode}
+                  onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Enter 6-digit code"
+                  inputMode="numeric"
+                  className="mt-3 field-input"
+                />
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <Button type="button" variant="secondary" onClick={closeEditModal} disabled={Boolean(assetActionLoading)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={mfaChallenge && mfaIntent === 'update' ? handleVerifyAssetMfa : handleUpdateAsset}
+                disabled={!isEditFormValid || assetActionLoading === 'update' || (mfaChallenge && mfaIntent === 'update' && mfaCode.length !== 6)}
+              >
+                {assetActionLoading === 'update'
+                  ? 'Saving...'
+                  : mfaChallenge && mfaIntent === 'update'
+                    ? 'Verify and save'
+                    : 'Save changes'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 p-4 backdrop-blur-xl">
+          <div className="w-full max-w-lg rounded-[2rem] border border-[var(--border)] bg-[var(--surface-strong)] p-6 shadow-[0_30px_120px_-40px_rgba(0,0,0,0.95)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="eyebrow">Remove asset</p>
+                <h2 className="mt-3 text-2xl font-semibold text-[var(--text-primary)]">{deleteTarget.title}</h2>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setDeleteTarget(null)}
+                disabled={Boolean(assetActionLoading)}
+                aria-label="Close delete asset confirmation"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <p className="mt-5 text-sm leading-7 text-[var(--text-secondary)]">
+              Are you sure you want to remove this asset from your portfolio?
+            </p>
+
+            {mfaChallenge && mfaIntent === 'delete' ? (
+              <div className="mt-5 rounded-3xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-100">
+                <p className="font-semibold">Recent MFA required before removing this asset.</p>
+                <input
+                  value={mfaCode}
+                  onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Enter 6-digit code"
+                  inputMode="numeric"
+                  className="mt-3 field-input"
+                />
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)} disabled={Boolean(assetActionLoading)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={mfaChallenge && mfaIntent === 'delete' ? handleVerifyAssetMfa : handleDeleteAsset}
+                disabled={assetActionLoading === 'delete' || (mfaChallenge && mfaIntent === 'delete' && mfaCode.length !== 6)}
+              >
+                {assetActionLoading === 'delete'
+                  ? 'Removing...'
+                  : mfaChallenge && mfaIntent === 'delete'
+                    ? 'Verify and remove'
+                    : 'Remove asset'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </PageTransition>
   )
 }

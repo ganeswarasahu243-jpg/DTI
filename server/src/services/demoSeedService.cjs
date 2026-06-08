@@ -19,48 +19,63 @@ async function ensureDemoSeed() {
     role: 'user',
     preferredOtpChannel: 'email',
     inactivityTimerDays: 30,
-    threshold: 2,
+    threshold: 1,
   })
-
-  const nomineeOne = upsertDemoUser({
+  const priyaNominee = upsertDemoUser({
     email: 'priya@loom-demo.local',
     name: 'Priya Nominee',
-    phone: '+15550000002',
-    passwordHash: demoPasswordHash,
-    role: 'nominee',
-    preferredOtpChannel: 'email',
-    inactivityTimerDays: 30,
-    threshold: 2,
-  })
-
-  const nomineeTwo = upsertDemoUser({
-    email: 'marcus@loom-demo.local',
-    name: 'Marcus Nominee',
-    phone: '+15550000003',
+    phone: '+15550000011',
     passwordHash: demoPasswordHash,
     role: 'nominee',
     preferredOtpChannel: 'sms',
     inactivityTimerDays: 30,
-    threshold: 2,
+    threshold: 1,
+  })
+  const marcusNominee = upsertDemoUser({
+    email: 'marcus@loom-demo.local',
+    name: 'Marcus Nominee',
+    phone: '+15550000012',
+    passwordHash: demoPasswordHash,
+    role: 'nominee',
+    preferredOtpChannel: 'sms',
+    inactivityTimerDays: 30,
+    threshold: 1,
+  })
+  const estateOwner = upsertDemoUser({
+    email: 'estate.owner@loom-demo.local',
+    name: 'Ethan Estate',
+    phone: null,
+    passwordHash: demoPasswordHash,
+    role: 'user',
+    preferredOtpChannel: 'email',
+    inactivityTimerDays: 45,
+    threshold: 1,
   })
 
   trustedCircleModel.deleteByOwner(owner.id)
-  trustedCircleModel.addNominee({
+  trustedCircleModel.deleteByOwner(estateOwner.id)
+
+  addTrustedNominee({
     ownerUserId: owner.id,
-    nomineeUserId: nomineeOne.id,
-    nomineeEmailHash: hashLookup('priya@loom-demo.local'),
-    nomineeEmailEncrypted: encryptText('priya@loom-demo.local'),
-    nomineeNameEncrypted: encryptText('Priya Nominee'),
+    nomineeUserId: priyaNominee.id,
+    nomineeEmail: 'priya@loom-demo.local',
+    nomineeName: 'Priya Nominee',
   })
-  trustedCircleModel.addNominee({
+  addTrustedNominee({
     ownerUserId: owner.id,
-    nomineeUserId: nomineeTwo.id,
-    nomineeEmailHash: hashLookup('marcus@loom-demo.local'),
-    nomineeEmailEncrypted: encryptText('marcus@loom-demo.local'),
-    nomineeNameEncrypted: encryptText('Marcus Nominee'),
+    nomineeUserId: marcusNominee.id,
+    nomineeEmail: 'marcus@loom-demo.local',
+    nomineeName: 'Marcus Nominee',
+  })
+  addTrustedNominee({
+    ownerUserId: estateOwner.id,
+    nomineeUserId: owner.id,
+    nomineeEmail: 'owner@loom-demo.local',
+    nomineeName: 'Olivia Owner',
   })
 
   assetModel.deleteByUser(owner.id)
+  assetModel.deleteByUser(estateOwner.id)
   assetModel.createAsset({
     userId: owner.id,
     title: 'Family Trust Ledger',
@@ -75,15 +90,23 @@ async function ensureDemoSeed() {
     encryptedDetails: encryptText('Custody process, multisig recovery instructions, and exchange transfer checklist.'),
     encryptedFinancialData: encryptText('Treasury wallet reserve: 12.45 BTC equivalent under estate governance.'),
   })
+  assetModel.createAsset({
+    userId: estateOwner.id,
+    title: 'Estate Recovery File',
+    type: 'Legal Document',
+    encryptedDetails: encryptText('Executor notes, probate checklist, and key contact approvals for estate transfer.'),
+    encryptedFinancialData: encryptText('Settlement reserve: $125,000 secured for dependent beneficiaries.'),
+  })
 }
 
 function upsertDemoUser({ email, name, phone, passwordHash, role, preferredOtpChannel, inactivityTimerDays, threshold }) {
+  const normalizedPhone = phone ? String(phone).trim() : null
   const existing = userModel.findByEmail(email)
   const seedPayload = {
     emailEncrypted: encryptText(email),
     nameEncrypted: encryptText(name),
-    phoneHash: hashLookup(phone),
-    phoneEncrypted: encryptText(phone),
+    phoneHash: normalizedPhone ? hashLookup(normalizedPhone) : null,
+    phoneEncrypted: normalizedPhone ? encryptText(normalizedPhone) : null,
     passwordHash,
     role,
     preferredOtpChannel,
@@ -103,6 +126,21 @@ function upsertDemoUser({ email, name, phone, passwordHash, role, preferredOtpCh
   const updatedUser = userModel.updateUserForSeed(existing.id, seedPayload)
   userModel.markEmailVerified(updatedUser.id)
   return userModel.findById(updatedUser.id)
+}
+
+function addTrustedNominee({
+  ownerUserId,
+  nomineeUserId,
+  nomineeEmail,
+  nomineeName,
+}) {
+  trustedCircleModel.addNominee({
+    ownerUserId,
+    nomineeUserId,
+    nomineeEmailHash: hashLookup(nomineeEmail),
+    nomineeEmailEncrypted: encryptText(nomineeEmail),
+    nomineeNameEncrypted: encryptText(nomineeName),
+  })
 }
 
 module.exports = { ensureDemoSeed }

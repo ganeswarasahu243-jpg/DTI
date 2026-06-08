@@ -10,28 +10,34 @@ export function signup(payload: {
   preferredOtpChannel?: 'email' | 'sms'
   inactivityTimerDays?: number
 }) {
-  return apiRequest<AuthChallengeResponse>('/api/auth/signup', {
+  return apiRequest<AuthChallengeResponse>('/send-otp', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      flow: 'signup',
+    }),
   })
 }
 
 export function login(payload: { email: string; password: string }) {
-  return apiRequest<AuthChallengeResponse | AuthResponse>('/api/auth/login', {
+  return apiRequest<AuthChallengeResponse | AuthResponse>('/send-otp', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      flow: 'login',
+    }),
   })
 }
 
 export function verifyLoginMfa(payload: { pendingToken: string; challengeId: string; code: string }) {
-  return apiRequest<AuthResponse>('/api/auth/mfa/verify-login', {
+  return apiRequest<AuthResponse>('/verify-otp', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
 export function verifyEmail(payload: { pendingToken: string; challengeId: string; code: string }) {
-  return apiRequest<AuthResponse>('/api/auth/verify-email', {
+  return apiRequest<AuthResponse>('/verify-otp', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

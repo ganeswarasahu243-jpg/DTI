@@ -27,6 +27,7 @@ export type ClaimSummary = {
   statusLabel: 'Pending Verification' | 'OTP Verified' | 'Waiting for Other Approvals' | 'Access Granted' | 'Access Denied'
   claimantName: string
   claimantContact: string
+  demoTimerSeconds?: number | null
   demoTimerMinutes?: number | null
   timerExpiresAt?: string | null
   otpExpiresAt?: string | null
@@ -36,14 +37,15 @@ export type ClaimSummary = {
   submittedAt?: string | null
   accessGrantedAt?: string | null
   demoMode: boolean
+  demoTimerOptionsSeconds: number[]
   demoTimerOptionsMinutes: number[]
   pollIntervalSeconds: number
   approvals: ClaimApproval[]
   portalToken?: string
   accessToken?: string
   accessTokenExpiresInMinutes?: number
-  devOtp?: string
   devApprovalTokens?: DevApprovalToken[]
+  devOtpCode?: string
 }
 
 export type ClaimAssetsResponse = {

@@ -2,26 +2,56 @@ const nodemailer = require('nodemailer')
 const { config } = require('../config/env.cjs')
 
 let transporter = null
+let hasPrintedEmailDebug = false
+
+function looksPlaceholder(value) {
+  return /your_|example|replace/i.test(String(value || ''))
+}
+
+function hasGmailConfig() {
+  return Boolean(config.gmail.user && config.gmail.appPassword)
+}
+
+function hasUsableGmailConfig() {
+  return hasGmailConfig() && !looksPlaceholder(config.gmail.user) && !looksPlaceholder(config.gmail.appPassword)
+}
 
 function hasSmtpConfig() {
   return Boolean(config.smtp.host && config.smtp.user && config.smtp.pass && config.smtp.from)
 }
 
 function getTransporter() {
-  if (!hasSmtpConfig()) {
-    return null
+  if (!hasUsableGmailConfig() && !hasSmtpConfig()) {
+    throw new Error('Email delivery is not configured. Set EMAIL_USER and EMAIL_PASS in environment variables.')
+  }
+
+  if (hasGmailConfig() && !hasUsableGmailConfig() && !hasSmtpConfig()) {
+    throw new Error('EMAIL_USER or EMAIL_PASS is still a placeholder. Set real Gmail + App Password.')
   }
 
   if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: config.smtp.host,
-      port: config.smtp.port,
-      secure: config.smtp.secure,
-      auth: {
-        user: config.smtp.user,
-        pass: config.smtp.pass,
-      },
-    })
+    if (config.env === 'development' && !hasPrintedEmailDebug) {
+      console.log('[otp-email-debug] EMAIL_USER =', process.env.EMAIL_USER || '(undefined)')
+      hasPrintedEmailDebug = true
+    }
+
+    transporter = hasUsableGmailConfig()
+      ? nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            user: config.gmail.user,
+            pass: config.gmail.appPassword,
+          },
+        })
+      : nodemailer.createTransport({
+          host: config.smtp.host,
+          port: config.smtp.port,
+          secure: config.smtp.secure,
+          auth: {
+            user: config.smtp.user,
+            pass: config.smtp.pass,
+          },
+        })
   }
 
   return transporter
@@ -48,32 +78,46 @@ function buildOtpEmail({ code, purpose }) {
 }
 
 async function sendOtpEmail(email, code, purpose) {
-  const preview = { email, code, purpose }
-  const mail = buildOtpEmail({ code, purpose })
-  const activeTransporter = getTransporter()
-
-  if (!activeTransporter) {
+  if (config.env === 'development' && !hasUsableGmailConfig() && !hasSmtpConfig()) {
+    console.log('[otp-email-preview]', { email, code, purpose })
     return {
       channel: 'email',
       delivered: true,
-      preview,
       provider: 'preview',
+      preview: {
+        email,
+        code,
+        purpose,
+      },
     }
   }
 
-  await activeTransporter.sendMail({
-    from: config.smtp.from,
-    to: email,
-    subject: mail.subject,
-    text: mail.text,
-    html: mail.html,
-  })
+  const mail = buildOtpEmail({ code, purpose })
+  const activeTransporter = getTransporter()
+  const fromAddress = hasUsableGmailConfig() ? (config.gmail.from || config.gmail.user) : config.smtp.from
+
+  try {
+    await activeTransporter.sendMail({
+      from: fromAddress,
+      to: email,
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+    })
+  } catch (error) {
+    console.error('[otp-email-error]', {
+      message: error?.message,
+      code: error?.code,
+      responseCode: error?.responseCode,
+      command: error?.command,
+    })
+    throw error
+  }
 
   return {
     channel: 'email',
     delivered: true,
-    preview,
-    provider: 'smtp',
+    provider: hasGmailConfig() ? 'gmail' : 'smtp',
   }
 }
 
@@ -101,4 +145,4 @@ function sendReleaseAlert(userId, message) {
   }
 }
 
-module.exports = { sendOtpEmail, sendOtpSms, sendReleaseAlert, hasSmtpConfig }
+module.exports = { sendOtpEmail, sendOtpSms, sendReleaseAlert, hasSmtpConfig, hasGmailConfig }

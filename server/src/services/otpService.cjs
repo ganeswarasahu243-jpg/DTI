@@ -1,3 +1,4 @@
+const crypto = require('crypto')
 const bcrypt = require('bcryptjs')
 const otpModel = require('../models/otpModel.cjs')
 const { config } = require('../config/env.cjs')
@@ -7,7 +8,7 @@ const { generateSecret, verifyTotp, buildOtpAuthUrl } = require('./totpService.c
 const notificationService = require('./notificationService.cjs')
 
 function generateEmailOtp() {
-  return String(Math.floor(Math.random() * 1000000)).padStart(6, '0')
+  return String(crypto.randomInt(0, 1000000)).padStart(6, '0')
 }
 
 async function createChallenge({ user, purpose, channel, metadata = {} }) {

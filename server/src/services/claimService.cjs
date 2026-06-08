@@ -14,6 +14,7 @@ const { config } = require('../config/env.cjs')
 const { encryptBuffer, encryptText, decryptText, hashLookup } = require('./encryptionService.cjs')
 const { signClaimAccessToken, signClaimPortalToken } = require('./claimAccessService.cjs')
 const { addSeconds, nowIso } = require('../utils/time.cjs')
+const PHONE_REGEX = /^\+?[1-9]\d{7,14}$/
 
 function decodeBase64(base64) {
   return Buffer.from(base64, 'base64')
@@ -31,26 +32,17 @@ function ownerFromIdentifier(identifier) {
   return userModel.findByPhone(String(identifier).trim())
 }
 
-function resolveTrustedClaimant(ownerUserId, claimantContact) {
-  if (String(claimantContact).includes('@')) {
-    const entry = trustedCircleModel.findByOwnerAndEmailHash(
-      ownerUserId,
-      hashLookup(claimantContact),
-    )
+function isDemoEmail(email) {
+  return String(email || '').trim().toLowerCase().endsWith('@loom-demo.local')
+}
 
-    if (!entry) {
-      return null
-    }
-
-    return {
-      trustedEntry: entry,
-      claimantUser: entry.nominee_user_id ? userModel.findById(entry.nominee_user_id) : null,
-      channel: 'email',
-      contactValue: String(claimantContact).trim().toLowerCase(),
-    }
+function resolveTrustedClaimant(ownerUserId, claimantPhone) {
+  const normalizedPhone = String(claimantPhone).trim()
+  if (!PHONE_REGEX.test(normalizedPhone)) {
+    return null
   }
 
-  const claimantUser = userModel.findByPhone(claimantContact)
+  const claimantUser = userModel.findByPhone(normalizedPhone)
   if (!claimantUser) {
     return null
   }
@@ -65,9 +57,9 @@ function resolveTrustedClaimant(ownerUserId, claimantContact) {
 
   return {
     trustedEntry,
-    claimantUser,
+    claimantUser: userModel.findById(claimantUser.id),
     channel: 'sms',
-    contactValue: String(claimantContact).trim(),
+    contactValue: normalizedPhone,
   }
 }
 
@@ -112,6 +104,7 @@ function claimSummary(claim, options = {}) {
     statusLabel: mapStatus(claim.status),
     claimantName: decryptText(claim.claimant_name_encrypted),
     claimantContact: decryptText(claim.claimant_contact_encrypted),
+    demoTimerSeconds: claim.demo_timer_minutes,
     demoTimerMinutes: claim.demo_timer_minutes,
     timerExpiresAt: claim.timer_expires_at,
     otpExpiresAt: claim.otp_expires_at,
@@ -121,7 +114,8 @@ function claimSummary(claim, options = {}) {
     submittedAt: claim.submitted_at,
     accessGrantedAt: claim.access_granted_at,
     demoMode: true,
-    demoTimerOptionsMinutes: config.claimDemoTimerOptionsMinutes,
+    demoTimerOptionsSeconds: config.claimDemoTimerOptionsSeconds,
+    demoTimerOptionsMinutes: config.claimDemoTimerOptionsSeconds,
     pollIntervalSeconds: config.claimStatusPollSeconds,
     approvals: approvals.map((entry) => ({
       id: entry.id,
@@ -132,8 +126,8 @@ function claimSummary(claim, options = {}) {
     portalToken: options.portalToken,
     accessToken: options.accessToken,
     accessTokenExpiresInMinutes: options.accessToken ? config.claimAccessTokenMinutes : undefined,
-    devOtp: options.devOtp,
     devApprovalTokens: options.devApprovalTokens,
+    devOtpCode: options.devOtpCode,
   }
 }
 
@@ -143,12 +137,21 @@ async function createClaimRequest({
   claimantContact,
   requestContext,
 }) {
+  const normalizedClaimantContact = String(claimantContact).trim()
+  if (!PHONE_REGEX.test(normalizedClaimantContact)) {
+    return {
+      ok: false,
+      status: 400,
+      message: 'Claimant phone number must be in E.164 format (example: +14155552671).',
+    }
+  }
+
   const owner = ownerFromIdentifier(deceasedIdentifier)
   if (!owner) {
     return { ok: false, status: 404, message: 'No LOOM user matches the provided registered email or phone.' }
   }
 
-  const trustedClaimant = resolveTrustedClaimant(owner.id, claimantContact)
+  const trustedClaimant = resolveTrustedClaimant(owner.id, normalizedClaimantContact)
   if (!trustedClaimant) {
     auditLogService.logEvent({
       userId: owner.id,
@@ -162,14 +165,31 @@ async function createClaimRequest({
       metadata: { claimantContact },
     })
 
-    return { ok: false, status: 403, message: 'Claimant is not in the trusted circle for this user.' }
+    return {
+      ok: false,
+      status: 403,
+      message: 'Claimant phone is not linked to the trusted circle for this user.',
+    }
   }
 
   const circle = trustedCircleService.getTrustedCircleSummary(
     owner.id,
     owner.trusted_circle_threshold,
   )
-  const otp = String(Math.floor(Math.random() * 1000000)).padStart(6, '0')
+  const ownerEmail = decryptText(owner.email_encrypted)
+  const claimantEmail = trustedClaimant.claimantUser
+    ? decryptText(trustedClaimant.claimantUser.email_encrypted)
+    : ''
+  const shouldUseDefaultDemoOtp =
+    config.env === 'development' &&
+    (
+      config.claimDemoClaimantPhones.includes(normalizedClaimantContact) ||
+      isDemoEmail(ownerEmail) ||
+      isDemoEmail(claimantEmail)
+    )
+  const otp = shouldUseDefaultDemoOtp
+    ? config.claimDevDefaultOtp
+    : String(Math.floor(Math.random() * 1000000)).padStart(6, '0')
   const otpHash = await bcrypt.hash(otp, 10)
   const otpExpiresAt = addSeconds(new Date(), config.claimOtpTtlSeconds).toISOString()
   const claim = claimModel.createClaim({
@@ -188,10 +208,13 @@ async function createClaimRequest({
     approvalThreshold: circle.effectiveThreshold,
   })
 
-  const delivery =
-    trustedClaimant.channel === 'sms'
-      ? await notificationService.sendOtpSms(trustedClaimant.contactValue, otp, 'claim-access')
-      : await notificationService.sendOtpEmail(trustedClaimant.contactValue, otp, 'claim-access')
+  let delivery
+  try {
+    delivery = await notificationService.sendOtpSms(trustedClaimant.contactValue, otp, 'claim-access')
+  } catch (_error) {
+    claimModel.updateStatus(claim.id, { status: 'access_denied', accessDeniedAt: nowIso() })
+    return { ok: false, status: 502, message: 'Unable to send OTP to claimant phone right now. Please try again.' }
+  }
 
   auditLogService.logEvent({
     userId: owner.id,
@@ -213,7 +236,7 @@ async function createClaimRequest({
     delivery,
     response: claimSummary(claim, {
       portalToken,
-      devOtp: delivery.provider === 'preview' ? delivery.preview?.code : undefined,
+      devOtpCode: shouldUseDefaultDemoOtp ? otp : undefined,
     }),
   }
 }

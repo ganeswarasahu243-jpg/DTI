@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   approveClaim,
   fetchClaimAssets,
@@ -9,7 +9,7 @@ import {
   submitClaim,
   verifyClaimOtp,
 } from '../claim/api'
-import type { ClaimAssetsResponse } from '../claim/types'
+import type { ClaimAssetsResponse, ClaimSummary } from '../claim/types'
 import { AnimatedProgressBar } from '../components/ui/AnimatedProgressBar'
 import { AnimatedCountdown } from '../components/ui/AnimatedCountdown'
 import { Button } from '../components/ui/Button'
@@ -36,19 +36,25 @@ const statusOrder = [
   'Access Denied',
 ] as const
 
-const timerOptions = [3, 5, 10] as const
+const timerOptions = [10, 20, 30] as const
 const demoClaimants = [
+  {
+    label: 'Use Olivia Demo Claimant',
+    deceasedIdentifier: 'estate.owner@loom-demo.local',
+    claimantName: 'Olivia Owner',
+    claimantContact: '+15550000001',
+  },
   {
     label: 'Use Priya Demo Claimant',
     deceasedIdentifier: 'owner@loom-demo.local',
     claimantName: 'Priya Nominee',
-    claimantContact: 'priya@loom-demo.local',
+    claimantContact: '+15550000011',
   },
   {
     label: 'Use Marcus Demo Claimant',
     deceasedIdentifier: 'owner@loom-demo.local',
     claimantName: 'Marcus Nominee',
-    claimantContact: 'marcus@loom-demo.local',
+    claimantContact: '+15550000012',
   },
 ] as const
 
@@ -86,21 +92,74 @@ function formatRemaining(iso: string | null | undefined, nowMs: number) {
 }
 
 export default function ClaimAccessPage() {
+  const location = useLocation()
+  const initializedFromVault = useRef(false)
   const [form, setForm] = useState({
     deceasedIdentifier: '',
     claimantName: '',
     claimantContact: '',
     otpCode: '',
   })
-  const [selectedTimer, setSelectedTimer] = useState<number>(3)
+  const [selectedTimer, setSelectedTimer] = useState<number>(10)
   const [idProof, setIdProof] = useState<File | null>(null)
   const [portalToken, setPortalToken] = useState<string | null>(null)
-  const [status, setStatus] = useState<Awaited<ReturnType<typeof requestClaimOtp>> | null>(null)
+  const [status, setStatus] = useState<ClaimSummary | null>(null)
   const [assetsResponse, setAssetsResponse] = useState<ClaimAssetsResponse | null>(null)
   const [loadingAction, setLoadingAction] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [nowMs, setNowMs] = useState(Date.now())
+
+  useEffect(() => {
+    if (initializedFromVault.current) {
+      return
+    }
+
+    const state = location.state as (
+      | {
+        prefill?: {
+          deceasedIdentifier?: string
+          claimantName?: string
+          claimantContact?: string
+        }
+        portalToken?: string | null
+        initialStatus?: ClaimSummary | null
+        sourceVault?: {
+          ownerName?: string
+          ownerEmail?: string
+        }
+      }
+      | null
+    )
+
+    if (!state) {
+      initializedFromVault.current = true
+      return
+    }
+
+    if (state.prefill) {
+      setForm((prev) => ({
+        ...prev,
+        deceasedIdentifier: state.prefill?.deceasedIdentifier || prev.deceasedIdentifier,
+        claimantName: state.prefill?.claimantName || prev.claimantName,
+        claimantContact: state.prefill?.claimantContact || prev.claimantContact,
+      }))
+    }
+
+    if (state.initialStatus) {
+      setStatus(state.initialStatus)
+      setPortalToken(state.initialStatus.portalToken || state.portalToken || null)
+    } else if (state.portalToken) {
+      setPortalToken(state.portalToken)
+    }
+
+    if (state.sourceVault?.ownerName || state.sourceVault?.ownerEmail) {
+      const label = state.sourceVault.ownerName || state.sourceVault.ownerEmail
+      setSuccess(`Claim flow initialized for ${label}. OTP has been sent to your registered contact.`)
+    }
+
+    initializedFromVault.current = true
+  }, [location.state])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -177,14 +236,15 @@ export default function ClaimAccessPage() {
 
       setStatus(response)
       setPortalToken(response.portalToken || null)
-      setAssetsResponse(null)
-      if (response.devOtp) {
-        setForm((prev) => ({ ...prev, otpCode: response.devOtp || '' }))
+      const otpCode = response.devOtpCode || ''
+      if (otpCode) {
+        setForm((prev) => ({ ...prev, otpCode }))
       }
+      setAssetsResponse(null)
       setSuccess(
-        response.devOtp
-          ? 'OTP generated in development mode. The demo OTP has been filled in for you below because email delivery is not configured yet.'
-          : 'OTP sent to the trusted claimant contact. Continue with verification.',
+        otpCode
+          ? `OTP sent to claimant phone. Default demo OTP ${otpCode} has been filled automatically.`
+          : 'OTP sent to claimant phone.',
       )
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to request OTP.')
@@ -239,7 +299,7 @@ export default function ClaimAccessPage() {
       const mimeType = idProof.type as 'application/pdf' | 'image/jpeg' | 'image/png'
       const response = await submitClaim({
         portalToken,
-        timerMinutes: selectedTimer,
+        timerSeconds: selectedTimer,
         idProof: {
           name: idProof.name,
           mimeType,
@@ -443,7 +503,7 @@ export default function ClaimAccessPage() {
                   <div className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--accent-soft)] text-sm font-semibold text-[var(--text-primary)]">Demo</div>
                   <div>
                     <p className="font-semibold text-[var(--text-primary)]">Quick demo claim access</p>
-                    <p className="text-sm text-[var(--text-secondary)]">Use a seeded trusted claimant so OTP and approvals work immediately in local development.</p>
+                    <p className="text-sm text-[var(--text-secondary)]">Use a seeded trusted claimant phone so OTP and approvals work immediately in local development.</p>
                   </div>
                 </div>
                 <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -469,9 +529,9 @@ export default function ClaimAccessPage() {
                   ))}
                 </div>
                 <div className="mt-4 rounded-[1.5rem] border border-[var(--border)] bg-[var(--bg-muted)] p-4 text-sm text-[var(--text-secondary)]">
-                  Owner: <span className="font-semibold text-[var(--text-primary)]">owner@loom-demo.local</span>
+                  Owner emails: <span className="font-semibold text-[var(--text-primary)]">owner@loom-demo.local</span> or <span className="font-semibold text-[var(--text-primary)]">estate.owner@loom-demo.local</span>
                   <br />
-                  Claimants: <span className="font-semibold text-[var(--text-primary)]">priya@loom-demo.local</span> or <span className="font-semibold text-[var(--text-primary)]">marcus@loom-demo.local</span>
+                  Claimant phones: <span className="font-semibold text-[var(--text-primary)]">+15550000001</span>, <span className="font-semibold text-[var(--text-primary)]">+15550000011</span>, or <span className="font-semibold text-[var(--text-primary)]">+15550000012</span>
                 </div>
               </div>
 
@@ -503,11 +563,12 @@ export default function ClaimAccessPage() {
                     />
                   </label>
                   <label className="block text-sm text-[var(--text-primary)]">
-                    <span className="mb-2 block text-[var(--text-secondary)]">Claimant email or phone</span>
+                    <span className="mb-2 block text-[var(--text-secondary)]">Claimant phone number</span>
                     <input
+                      type="tel"
                       value={form.claimantContact}
                       onChange={(event) => setForm((prev) => ({ ...prev, claimantContact: event.target.value }))}
-                      placeholder="trusted-contact@loom.local"
+                      placeholder="+14155552671"
                       className="field-input"
                     />
                   </label>
@@ -525,7 +586,7 @@ export default function ClaimAccessPage() {
                   <div className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--accent-soft)] text-sm font-semibold text-[var(--text-primary)]">2</div>
                   <div>
                     <p className="font-semibold text-[var(--text-primary)]">Verify claimant OTP</p>
-                    <p className="text-sm text-[var(--text-secondary)]">OTPs expire in 5 minutes and are protected by retry limits.</p>
+                    <p className="text-sm text-[var(--text-secondary)]">Phone OTPs expire in 5 minutes and are protected by retry limits.</p>
                   </div>
                 </div>
                 <div className="mt-5 grid gap-4 md:grid-cols-[0.54fr_0.46fr]">
@@ -544,18 +605,11 @@ export default function ClaimAccessPage() {
                   <div className="rounded-[1.5rem] border border-[var(--border)] bg-[var(--bg-muted)] p-4">
                     <p className="text-sm text-[var(--text-muted)]">Delivery channel</p>
                     <p className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
-                      {status?.claimantContact || 'Trusted claimant contact'}
+                      {status?.claimantContact || 'Trusted claimant phone'}
                     </p>
-                    {status?.devOtp ? (
-                      <p className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--accent)]">
-                        Demo OTP: {status.devOtp}
-                      </p>
-                    ) : null}
-                    {!status?.devOtp ? (
-                      <p className="mt-3 text-sm text-[var(--text-secondary)]">
-                        Real email or SMS delivery requires mail/SMS configuration. In local demo mode, the OTP appears here.
-                      </p>
-                    ) : null}
+                    <p className="mt-3 text-sm text-[var(--text-secondary)]">
+                      OTP sent to claimant phone. Enter the 6-digit code from SMS.
+                    </p>
                   </div>
                 </div>
                 <div className="mt-5">
@@ -612,8 +666,8 @@ export default function ClaimAccessPage() {
                               : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)]'
                           }`}
                         >
-                          <p className="text-lg font-semibold text-[var(--text-primary)]">{option} min</p>
-                          <p className="mt-2 text-sm text-[var(--text-secondary)]">Demo replacement for 30/60/90 days</p>
+                          <p className="text-lg font-semibold text-[var(--text-primary)]">{option} sec</p>
+                          <p className="mt-2 text-sm text-[var(--text-secondary)]">Demo replacement window for local testing.</p>
                         </motion.button>
                       ))}
                     </div>

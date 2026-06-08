@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Eye, EyeOff, KeyRound, LockKeyhole, ShieldCheck, Sparkles } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import type { AuthChallengeResponse, UserRole } from '../auth/types'
+import type { AuthChallengeResponse } from '../auth/types'
 import { Button } from '../components/ui/Button'
 import { PageTransition } from '../components/ui/PageTransition'
 import { Reveal } from '../components/ui/Reveal'
@@ -12,7 +12,6 @@ import { ThemeToggle } from '../components/ui/ThemeToggle'
 
 const demoUsers = [
   { label: 'User demo', email: 'owner@loom-demo.local', password: 'DemoPass123!' },
-  { label: 'Nominee demo', email: 'priya@loom-demo.local', password: 'DemoPass123!' },
 ]
 
 const socialProviders = ['Google', 'Apple', 'Microsoft'] as const
@@ -27,17 +26,22 @@ export default function AuthPage() {
   const [otpCode, setOtpCode] = useState('')
   const [challenge, setChallenge] = useState<AuthChallengeResponse | null>(null)
   const [showPassword, setShowPassword] = useState(false)
-  const [form, setForm] = useState({ email: '', password: '', name: '', role: 'user' as UserRole })
+  const [form, setForm] = useState({ email: '', password: '', name: '', role: 'user' as const })
 
   const redirectTo = (location.state as { from?: string } | null)?.from || '/dashboard'
-
-  useEffect(() => {
-    if (user) {
-      navigate('/dashboard', { replace: true })
-    }
-  }, [navigate, user])
+  const redirectedFromProtectedRoute = Boolean((location.state as { from?: string } | null)?.from)
+  const googleOauthEnabled =
+    authMode === 'supabase' &&
+    String(import.meta.env.VITE_GOOGLE_OAUTH_ENABLED || '').trim().toLowerCase() === 'true'
+  const isDemoEmailEntry = form.email.trim().toLowerCase().endsWith('@loom-demo.local')
 
   const emailLooksValid = form.email.trim().length > 3 && /\S+@\S+\.\S+/.test(form.email)
+
+  useEffect(() => {
+    if (user && redirectedFromProtectedRoute) {
+      navigate(redirectTo, { replace: true })
+    }
+  }, [user, navigate, redirectTo, redirectedFromProtectedRoute])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -53,7 +57,7 @@ export default function AuthPage() {
         throw new Error('Enter your full name to create the account.')
       }
 
-      if (!challenge && mode === 'signup' && form.password.length < 8) {
+      if (!challenge && mode === 'signup' && authMode !== 'supabase' && form.password.length < 8) {
         throw new Error('Password must be at least 8 characters for signup.')
       }
 
@@ -76,11 +80,12 @@ export default function AuthPage() {
               })
 
         if ('token' in nextChallenge) {
+          navigate(redirectTo)
           return
         }
 
         setChallenge(nextChallenge)
-        setOtpCode('')
+        setOtpCode(nextChallenge.devOtpCode || '')
         return
       }
 
@@ -93,6 +98,11 @@ export default function AuthPage() {
   }
 
   const handleGoogleLogin = async () => {
+    if (!googleOauthEnabled) {
+      setError('Google OAuth is disabled for this environment. Use email OTP or enable VITE_GOOGLE_OAUTH_ENABLED=true after enabling Google in Supabase.')
+      return
+    }
+
     setLoading(true)
     setError('')
 
@@ -141,7 +151,7 @@ export default function AuthPage() {
                   <KeyRound className="h-5 w-5 text-[var(--accent-strong)]" />
                   <p className="mt-4 text-lg font-semibold text-[var(--text-primary)]">Role-aware access</p>
                   <p className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">
-                    Owners, nominees, and admins are guided through separate permissions and workflows.
+                    Owners and admins are guided through separate permissions and workflows.
                   </p>
                 </div>
               </div>
@@ -149,7 +159,7 @@ export default function AuthPage() {
               <div className="mt-8 panel rounded-[2rem] p-5">
                 <p className="eyebrow">Demo accounts</p>
                 <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">
-                  Development helpers are available for user and nominee sign-in only. Admin credentials stay backend-only.
+                  Development helper is available for user sign-in only. Admin credentials stay backend-only.
                 </p>
                 <div className="mt-4 grid gap-3">
                   {demoUsers.map((demoUser, index) => (
@@ -169,10 +179,13 @@ export default function AuthPage() {
                           setLoading(true)
                           try {
                             const response = await login({ email: demoUser.email, password: demoUser.password })
-                            if (!('token' in response)) {
-                              setChallenge(response)
-                              setOtpCode('')
+                            if ('token' in response) {
+                              navigate(redirectTo)
+                              return
                             }
+
+                            setChallenge(response)
+                            setOtpCode(response.devOtpCode || '')
                           } catch (submitError) {
                             setError(submitError instanceof Error ? submitError.message : 'Unable to authenticate.')
                           } finally {
@@ -247,17 +260,17 @@ export default function AuthPage() {
                     <button
                       key={provider}
                       type="button"
-                      disabled={provider !== 'Google' || authMode !== 'supabase' || loading}
-                      onClick={provider === 'Google' && authMode === 'supabase' ? handleGoogleLogin : undefined}
+                      disabled={provider !== 'Google' || !googleOauthEnabled || loading}
+                      onClick={provider === 'Google' && googleOauthEnabled ? handleGoogleLogin : undefined}
                       className={`rounded-[1.35rem] border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm transition-all duration-300 ease-in-out ${
-                        provider === 'Google' && authMode === 'supabase'
+                        provider === 'Google' && googleOauthEnabled
                           ? 'text-[var(--text-primary)] hover:-translate-y-1 hover:border-[var(--border-strong)]'
                           : 'text-[var(--text-secondary)] opacity-70'
                       }`}
                     >
                       {provider}
                       <span className="ml-2 text-[var(--text-muted)]">
-                        {provider === 'Google' && authMode === 'supabase' ? 'OAuth' : 'Soon'}
+                        {provider === 'Google' && googleOauthEnabled ? 'OAuth' : 'Soon'}
                       </span>
                     </button>
                   ))}
@@ -278,31 +291,6 @@ export default function AuthPage() {
                         required
                       />
                     </label>
-
-                    <label className="block text-sm text-[var(--text-primary)]">
-                      <span className="mb-2 block text-[var(--text-secondary)]">Role</span>
-                      <select
-                        value={form.role}
-                        onChange={(event) => setForm({ ...form, role: event.target.value as UserRole })}
-                        className="field-input"
-                      >
-                        <option value="user">User</option>
-                        <option value="nominee">Nominee</option>
-                      </select>
-                    </label>
-
-                    <AnimatePresence>
-                      {form.role === 'nominee' ? (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -8 }}
-                          className="rounded-[1.75rem] border border-[var(--border)] bg-[var(--accent-soft)] px-4 py-4 text-sm text-[var(--text-primary)]"
-                        >
-                          Nominee signup stays connected to the owner workflow. Use the nominee demo account for testing or ask the owner to invite you from their trusted circle.
-                        </motion.div>
-                      ) : null}
-                    </AnimatePresence>
                   </>
                 ) : null}
 
@@ -334,10 +322,11 @@ export default function AuthPage() {
 
                     <div className="rounded-[1.75rem] border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-sm text-[var(--text-secondary)]">
                       {challenge.purpose === 'email-verification'
-                        ? <>We sent a verification code to your email address before activating your account.</>
-                        : <>MFA is required for every login. Channel: <span className="font-semibold text-[var(--text-primary)]">{challenge.channel}</span>.</>}
-                      {challenge.devOtp ? (
-                        <span className="mt-2 block text-[var(--accent)]">Dev OTP: {challenge.devOtp}</span>
+                        ? <>We sent a verification email to your inbox. Use the 6-digit code or the magic link to continue.</>
+                        : <>MFA is required for every login. Use the 6-digit code or the magic link sent via <span className="font-semibold text-[var(--text-primary)]">{challenge.channel}</span>.</>}
+                      <span className="mt-2 block">The OTP expires in 5 minutes.</span>
+                      {challenge.devOtpCode ? (
+                        <span className="mt-2 block text-[var(--accent)]">Development preview OTP has been auto-filled.</span>
                       ) : null}
                     </div>
                   </motion.div>
@@ -358,7 +347,7 @@ export default function AuthPage() {
                       ) : null}
                     </label>
 
-                    {authMode === 'supabase' ? (
+                    {authMode === 'supabase' && !(mode === 'login' && isDemoEmailEntry) ? (
                       <div className="rounded-[1.75rem] border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-sm text-[var(--text-secondary)]">
                         We will send a 6-digit code to your email address through Supabase. No password is required for this flow.
                       </div>
@@ -406,7 +395,7 @@ export default function AuthPage() {
                 </AnimatePresence>
 
                 <div className="flex flex-col gap-3 sm:flex-row">
-                  <Button type="submit" className="flex-1">
+                  <Button type="submit" className="flex-1" disabled={loading || (Boolean(challenge) && otpCode.length !== 6)}>
                     {loading ? <Spinner className="border-slate-900/20 border-t-slate-950" /> : null}
                     {challenge
                       ? challenge.purpose === 'email-verification'

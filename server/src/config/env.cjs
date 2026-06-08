@@ -148,18 +148,25 @@ const config = {
   demoAdminPassword: process.env.DEMO_ADMIN_PASSWORD || 'Demo@1234',
   demoAdminName: process.env.DEMO_ADMIN_NAME || 'Demo Admin Access',
   demoAdminResetOnBoot: flag(process.env.DEMO_ADMIN_RESET_ON_BOOT, false),
-  otpTtlSeconds: toNumber(process.env.OTP_TTL_SECONDS, 90),
+  otpTtlSeconds: toNumber(process.env.OTP_TTL_SECONDS, 300),
   otpMaxAttempts: toNumber(process.env.OTP_MAX_ATTEMPTS, 3),
   claimOtpTtlSeconds: toNumber(process.env.CLAIM_OTP_TTL_SECONDS, 300),
   claimOtpMaxAttempts: toNumber(process.env.CLAIM_OTP_MAX_ATTEMPTS, 3),
   claimAccessTokenMinutes: toNumber(process.env.CLAIM_ACCESS_TOKEN_MINUTES, 10),
   claimApprovalTokenHours: toNumber(process.env.CLAIM_APPROVAL_TOKEN_HOURS, 12),
   claimStatusPollSeconds: toNumber(process.env.CLAIM_STATUS_POLL_SECONDS, 5),
-  emailVerificationTtlSeconds: toNumber(process.env.EMAIL_VERIFICATION_TTL_SECONDS, 600),
+  emailVerificationTtlSeconds: toNumber(process.env.EMAIL_VERIFICATION_TTL_SECONDS, 300),
   claimIdProofLimitBytes: toNumber(process.env.CLAIM_ID_PROOF_LIMIT_BYTES, 3 * 1024 * 1024),
-  claimDemoTimerOptionsMinutes: parseCsv(process.env.CLAIM_DEMO_TIMER_OPTIONS_MINUTES, ['3', '5', '10'])
+  claimDemoTimerOptionsSeconds: parseCsv(
+    process.env.CLAIM_DEMO_TIMER_OPTIONS_SECONDS || process.env.CLAIM_DEMO_TIMER_OPTIONS_MINUTES,
+    ['10', '20', '30'],
+  )
     .map((entry) => Number(entry))
     .filter((entry) => Number.isInteger(entry) && entry > 0),
+  claimDemoClaimantPhones: parseCsv(process.env.CLAIM_DEMO_CLAIMANT_PHONES, ['+15550000011', '+15550000012']),
+  claimDevDefaultOtp: /^\d{6}$/.test(String(process.env.CLAIM_DEV_DEFAULT_OTP || '').trim())
+    ? String(process.env.CLAIM_DEV_DEFAULT_OTP).trim()
+    : '123456',
   recentMfaMinutes: toNumber(process.env.RECENT_MFA_MINUTES, 10),
   inactivityThresholdDays: defaultInactivityThresholdDays,
   inactivityTimerOptionsDays,
@@ -179,6 +186,11 @@ const config = {
   enforceHttps: flag(process.env.ENFORCE_HTTPS, env === 'production'),
   appBaseUrl,
   allowedOrigins,
+  gmail: {
+    user: process.env.EMAIL_USER || process.env.GMAIL_USER || '',
+    appPassword: process.env.EMAIL_PASS || process.env.GMAIL_APP_PASSWORD || '',
+    from: process.env.EMAIL_FROM || process.env.GMAIL_FROM || process.env.EMAIL_USER || process.env.GMAIL_USER || '',
+  },
   smtp: {
     host: process.env.SMTP_HOST || '',
     port: toNumber(process.env.SMTP_PORT, 465),
